@@ -73,8 +73,11 @@ use crate::Cpumask;
 use anyhow::bail;
 use anyhow::Result;
 use glob::glob;
+#[cfg(feature = "gpu")]
 use nvml_wrapper::bitmasks::InitFlags;
+#[cfg(feature = "gpu")]
 use nvml_wrapper::enum_wrappers::device::Clock;
+#[cfg(feature = "gpu")]
 use nvml_wrapper::Nvml;
 use sscanf::sscanf;
 use std::collections::BTreeMap;
@@ -221,13 +224,16 @@ impl Cache {
     }
 }
 
+#[cfg(feature = "gpu")]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialOrd, PartialEq)]
 pub enum GpuIndex {
     Nvidia { nvml_id: u32 },
 }
 
+#[cfg(feature = "gpu")]
 #[derive(Debug, Clone)]
 pub struct Gpu {
+    #[cfg(feature = "gpu")]
     pub index: GpuIndex,
     pub node_id: usize,
     pub max_graphics_clock: usize,
@@ -240,6 +246,7 @@ pub struct Gpu {
 pub struct Node {
     id: usize,
     llcs: BTreeMap<usize, Cache>,
+    #[cfg(feature = "gpu")]
     gpus: BTreeMap<GpuIndex, Gpu>,
     span: Cpumask,
 }
@@ -278,6 +285,7 @@ impl Node {
     }
 
     // Get the map of all GPUs for this NUMA node.
+    #[cfg(feature = "gpu")]
     pub fn gpus(&self) -> &BTreeMap<GpuIndex, Gpu> {
         &self.gpus
     }
@@ -351,6 +359,7 @@ impl Topology {
     }
 
     /// Get a vec of all GPUs on the hosts.
+    #[cfg(feature = "gpu")]
     pub fn gpus(&self) -> BTreeMap<GpuIndex, &Gpu> {
         let mut gpus = BTreeMap::new();
         for node in &self.nodes {
@@ -597,6 +606,7 @@ fn avg_cpu_freq() -> Option<(usize, usize)> {
     Some((avg_base_freq / nr_cpus, top_max_freq))
 }
 
+#[cfg(feature = "gpu")]
 fn create_gpus() -> BTreeMap<usize, Vec<Gpu>> {
     let mut gpus: BTreeMap<usize, Vec<Gpu>> = BTreeMap::new();
 
@@ -610,7 +620,9 @@ fn create_gpus() -> BTreeMap<usize, Vec<Gpu>> {
                 let Ok(nvidia_gpu) = nvml.device_by_index(i) else {
                     continue;
                 };
-                let graphics_boost_clock = nvidia_gpu.max_customer_boost_clock(Clock::Graphics).unwrap_or(0);
+                let graphics_boost_clock = nvidia_gpu
+                    .max_customer_boost_clock(Clock::Graphics)
+                    .unwrap_or(0);
                 let sm_boost_clock = nvidia_gpu.max_customer_boost_clock(Clock::SM).unwrap_or(0);
                 let Ok(memory_info) = nvidia_gpu.memory_info() else {
                     continue;
@@ -629,8 +641,8 @@ fn create_gpus() -> BTreeMap<usize, Vec<Gpu>> {
                 let numa_path = format!("/sys/bus/pci/devices/{}/numa_node", fixed_bus_id);
                 let numa_node = read_file_usize(&Path::new(&numa_path)).unwrap_or(0);
 
-                let gpu = Gpu{
-                    index: GpuIndex::Nvidia{nvml_id: index},
+                let gpu = Gpu {
+                    index: GpuIndex::Nvidia { nvml_id: index },
                     node_id: numa_node as usize,
                     max_graphics_clock: graphics_boost_clock as usize,
                     max_sm_clock: sm_boost_clock as usize,
@@ -653,21 +665,23 @@ fn create_gpus() -> BTreeMap<usize, Vec<Gpu>> {
 
 fn create_default_node(online_mask: &Cpumask) -> Result<Vec<Node>> {
     let mut nodes: Vec<Node> = Vec::with_capacity(1);
-    let system_gpus = create_gpus();
-    let mut node_gpus = BTreeMap::new();
-    match system_gpus.get(&0) {
+    #[cfg(feature = "gpu")]
+    let mut node_gpus: BTreeMap<GpuIndex, Gpu> = BTreeMap::new();
+    #[cfg(feature = "gpu")]
+    match create_gpus().get(&0) {
         Some(gpus) => {
             for gpu in gpus {
                 node_gpus.insert(gpu.index, gpu.clone());
             }
         }
-        _ => {},
+        _ => {}
     };
 
     let mut node = Node {
         id: 0,
         llcs: BTreeMap::new(),
         span: Cpumask::new()?,
+        #[cfg(feature = "gpu")]
         gpus: node_gpus,
     };
 
@@ -689,6 +703,7 @@ fn create_default_node(online_mask: &Cpumask) -> Result<Vec<Node>> {
 fn create_numa_nodes(online_mask: &Cpumask) -> Result<Vec<Node>> {
     let mut nodes: Vec<Node> = Vec::new();
 
+    #[cfg(feature = "gpu")]
     let system_gpus = create_gpus();
 
     let numa_paths = glob("/sys/devices/system/node/node*")?;
@@ -701,20 +716,24 @@ fn create_numa_nodes(online_mask: &Cpumask) -> Result<Vec<Node>> {
             }
         };
 
-        let mut node_gpus = BTreeMap::new();
+        #[cfg(feature = "gpu")]
+        let mut node_gpus: BTreeMap<GpuIndex, Gpu> = BTreeMap::new();
+
+        #[cfg(feature = "gpu")]
         match system_gpus.get(&node_id) {
             Some(gpus) => {
                 for gpu in gpus {
                     node_gpus.insert(gpu.index, gpu.clone());
                 }
             }
-            _ => {},
+            _ => {}
         };
 
         let mut node = Node {
             id: node_id,
             llcs: BTreeMap::new(),
             span: Cpumask::new()?,
+            #[cfg(feature = "gpu")]
             gpus: node_gpus,
         };
 

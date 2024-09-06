@@ -135,3 +135,34 @@ jobs:
       - run: cargo build  --manifest-path rust/Cargo.toml
       - run: cargo test --manifest-path rust/Cargo.toml --no-run
       - run: vng -v -m10G -c8 --force-9p -r linux/arch/x86/boot/bzImage  --net user -- cargo test --manifest-path rust/Cargo.toml
+      rust-test-no-default:
+        runs-on: ubuntu-22.04
+        needs: build-kernel
+        steps:
+          - uses: actions/checkout@v4
+          - uses: ./.github/actions/install-deps-action
+          # cache rust deps, invalidate when kernel commit changes
+          # get latest head commit of sched_ext for-next
+          - run: echo "SCHED_EXT_KERNEL_COMMIT=$(git ls-remote https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git heads/for-next | awk '{print $1}')" >> $GITHUB_ENV
+          # cache bzImage alone for rust tests
+          - name: Cache bzImage
+            id: cache-bzImage
+            uses: actions/cache@v4
+            with:
+              path: |
+                linux/arch/x86/boot/bzImage
+              key: ${{ env.SCHED_EXT_KERNEL_COMMIT }}
+    
+          # need to re-run job when kernel head changes between build and test running.
+          - if: ${{ steps.cache-bzImage.outputs.cache-hit != 'true' }}
+            name: exit if cache stale
+            run: exit -1
+          
+          - uses: Swatinem/rust-cache@v2
+            with: 
+              shared-key: ${{ env.SCHED_EXT_KERNEL_COMMIT }}
+              workspaces: rust
+              prefix-key: "1"
+          - run: cargo build --no-default-features --manifest-path rust/Cargo.toml
+          - run: cargo test --no-default-features --manifest-path rust/Cargo.toml --no-run
+          - run: vng -v -m10G -c8 --force-9p -r linux/arch/x86/boot/bzImage  --net user -- cargo test --manifest-path rust/Cargo.toml
