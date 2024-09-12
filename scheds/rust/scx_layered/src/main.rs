@@ -1290,7 +1290,8 @@ impl Layer {
         {
             trace!(
                 "layer-{} needs more CPUs (util={:.3}) but is over the load fraction",
-                &self.name, layer_util
+                &self.name,
+                layer_util
             );
             return Ok(false);
         }
