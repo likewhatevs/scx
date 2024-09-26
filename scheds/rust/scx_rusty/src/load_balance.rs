@@ -322,7 +322,7 @@ impl LoadEntity {
 
 #[derive(Debug)]
 struct TaskInfo {
-    task_id: u64,
+    task_id: i32,
     load: OrderedFloat<f64>,
     dom_mask: u64,
     preferred_dom_mask: u64,
@@ -364,8 +364,8 @@ impl Domain {
         }
     }
 
-    fn transfer_load(&mut self, load: f64, task_id: u64, other: &mut Domain, skel: &mut BpfSkel) {
-        let ctask_id = (task_id as u64).to_ne_bytes();
+    fn transfer_load(&mut self, load: f64, task_id: i32, other: &mut Domain, skel: &mut BpfSkel) {
+        let ctask_id = (task_id as libc::pid_t).to_ne_bytes();
         let dom_id: u32 = other.id.try_into().unwrap();
 
         // Ask BPF code to execute the migration.
@@ -588,7 +588,7 @@ impl<'a, 'b> LoadBalancer<'a, 'b> {
 
         for dom_id in self.dom_group.doms().keys() {
             let dom = *dom_id;
-            let dom_key = unsafe { std::mem::transmute::<u32, [u8; 4]>(dom as u32) };
+            let dom_key = unsafe { std::mem::transmute::<u32, [u8;4]>(dom as u32) };
 
             aggregator.init_domain(dom);
 
@@ -676,7 +676,7 @@ impl<'a, 'b> LoadBalancer<'a, 'b> {
 
         for idx in ridx..widx {
             let task_id = active_task_ids.task_ids[(idx % MAX_TASK_IDS) as usize];
-            let key = unsafe { std::mem::transmute::<u64, [u8; 8]>(task_id) };
+            let key = unsafe { std::mem::transmute::<i32, [u8; 4]>(task_id) };
 
             if let Some(task_data_elem) = task_data.lookup(&key, libbpf_rs::MapFlags::ANY)? {
                 let task_ctx =
