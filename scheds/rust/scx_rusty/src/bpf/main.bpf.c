@@ -186,31 +186,21 @@ static struct dom_ctx *lookup_dom_ctx(u32 dom_id)
 	return domc;
 }
 
-static int get_task_from_id(u64 task_id, struct task_struct *p_in){
-	struct task_struct *p;
-	p_in = (struct task_struct*) task_id;
-	if(p) return 1;
-	return 0;
-}
-
-static struct task_ctx *try_lookup_task_ctx(struct task_struct *p)
+static struct task_ctx *try_lookup_task_ctx(u64 task_id)
 {
-	u64 task_id = (u64)p;
-
 	return bpf_map_lookup_elem(&task_data, &task_id);
 }
 
 static struct task_ctx *lookup_task_ctx(struct task_struct *p)
 {
-	struct task_ctx *taskc;
+    struct task_ctx *taskc;
+  	u64 task_id;
+    task_id = (u64)p;
 
-	taskc = try_lookup_task_ctx(p);
+	taskc = try_lookup_task_ctx(task_id);
 	if (!taskc)
-		if(p){
-			scx_bpf_error("task_ctx lookup failed for pid %d", p->pid);
-		} else {
-			scx_bpf_error("task_ctx lookup failed for task struct");
-		}
+		scx_bpf_error("task_ctx lookup failed for pid %llu", task_id);
+
 	return taskc;
 }
 
@@ -413,11 +403,6 @@ static int dom_xfer_task(u64 task_id, u32 new_dom_id, u64 now)
 	struct dom_ctx *from_domc, *to_domc;
 	struct task_ctx *taskc;
 	struct task_struct *p;
-
-	if (!get_task_from_id(task_id, p)) {
-		scx_bpf_error("Failed to lookup task_struct");
-		return 0;
-	}
 
 	taskc = lookup_task_ctx(p);
 	if (!taskc)
@@ -1377,7 +1362,7 @@ void BPF_STRUCT_OPS(rusty_runnable, struct task_struct *p, u64 enq_flags)
 	wakee_ctx->sum_runtime = 0;
 
 	waker = bpf_get_current_task_btf();
-	if (!(waker_ctx = try_lookup_task_ctx(waker)))
+	if (!(waker_ctx = try_lookup_task_ctx((u64)waker)))
 		return;
 
 	interval = now - waker_ctx->last_woke_at;
@@ -1570,14 +1555,10 @@ static void task_pick_and_set_domain(struct task_ctx *taskc,
 	if (nr_doms > 1)
 		dom_id = task_pick_domain(taskc, p, cpumask);
 
-	if (!task_set_domain(taskc, p, dom_id, init_dsq_vtime)){
-		if(p){
-			scx_bpf_error("Failed to set dom%d for %s[%d]",
-					dom_id, p->comm, p->pid);
-		} else {
-			scx_bpf_error("failed to set dom%d for missing task id", dom_id);
-		}
-	}
+	if (!task_set_domain(taskc, p, dom_id, init_dsq_vtime))
+		scx_bpf_error("Failed to set dom%d for %s[%d]", dom_id, p->comm, p->pid);
+
+
 }
 
 void BPF_STRUCT_OPS(rusty_set_cpumask, struct task_struct *p,
