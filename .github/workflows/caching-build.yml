@@ -364,9 +364,6 @@ jobs:
       - uses: ./.github/actions/install-deps-action
       - name: Build Book and Linux Docs
         run: |
-          curl https://sh.rustup.rs -sSf | RUSTUP_INIT_SKIP_PATH_CHECK=yes sh -s -- -y
-          rustup install nightly
-          export PATH="~/.cargo/bin:$PATH"
           RUSTDOCFLAGS="--enable-index-page -Zunstable-options" ~/.cargo/bin/cargo +nightly doc --workspace --no-deps --bins --lib --examples --document-private-items
           sudo apt install build-essential graphviz sphinx-doc python3-sphinx-rtd-theme texlive-latex-recommended python3-yaml -y
           cargo install htmlq
