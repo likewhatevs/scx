@@ -364,7 +364,7 @@ jobs:
       - uses: ./.github/actions/install-deps-action
       - name: Build Book and Linux Docs
         run: |
-          rustup component add rustfmt
+          cd / && rustup component add rustfmt && cd $OLDPWD
           RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo +nightly doc --workspace --no-deps --bins --lib --examples --document-private-items
           sudo apt install build-essential graphviz sphinx-doc python3-sphinx-rtd-theme texlive-latex-recommended python3-yaml -y
           cargo install htmlq
