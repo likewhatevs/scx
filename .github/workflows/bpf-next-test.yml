@@ -11,7 +11,7 @@ on:
   # bpf-next bzImage.
 jobs:
   build-kernel:
-    runs-on: ubuntu-24.10
+    runs-on: ubuntu-22.04
     steps:
       # prevent cache permission errors
       - run: sudo chown root /usr/bin/tar && sudo chmod u+s /usr/bin/tar
@@ -73,7 +73,7 @@ jobs:
         run: cd linux && make headers
 
   integration-test:
-    runs-on: ubuntu-24.10
+    runs-on: ubuntu-22.04
     needs: build-kernel
     strategy:
           matrix:
