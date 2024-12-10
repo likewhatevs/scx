@@ -385,3 +385,20 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  packaging-test:
+    runs-on: ubuntu-24.04
+    strategy:
+          matrix:
+            target: [ arch ]
+          fail-fast: false
+    steps:
+      # prevent cache permission errors
+      - run: sudo chown root /usr/bin/tar && sudo chmod u+s /usr/bin/tar
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-deps-action
+
+      # veristat
+      - run: cd packaging/${{ matrix.target }}
+      - run: sh test.sh
+
