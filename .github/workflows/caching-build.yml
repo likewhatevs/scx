@@ -400,5 +400,5 @@ jobs:
 
       # veristat
       - run: cd packaging/${{ matrix.target }}
-      - run: sh test.sh
+      - run: sudo sh test.sh
 
