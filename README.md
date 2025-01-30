@@ -344,7 +344,7 @@ toolchains are available. Simply run:
 
 ```
 $ cargo install --locked scx_rusty
-```
+`` `
 
 and `scx_rusty` will be built and installed as `~/.cargo/bin/scx_rusty`.
 
