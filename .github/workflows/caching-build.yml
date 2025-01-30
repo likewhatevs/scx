@@ -188,7 +188,7 @@ jobs:
       uses: rtCamp/action-slack-notify@v2
       env:
         SLACK_USERNAME: ci
-        SLACK_ICON: https://i.kym-cdn.com/entries/icons/original/000/018/012/this_is_fine.jpeg
+        SLACK_ICON: https://www.dictionary.com/e/wp-content/uploads/2018/03/thisisfine-1.jpg
         SLACK_TITLE: Workflow ${{ needs.integration-test.result }}
         SLACK_MESSAGE: stable ci job failed.
         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
