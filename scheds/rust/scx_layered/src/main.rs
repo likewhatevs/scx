@@ -2025,10 +2025,7 @@ impl<'a> Scheduler<'a> {
                     if self.opts.affinitize_gpu_tasks
                         && !self.gpu_mon_data.gpu_to_affinity.is_empty()
                     {
-                        let cpu_set = self
-                            .gpu_mon_data
-                            .gpu_to_affinity
-                            .get(&i);
+                        let cpu_set = self.gpu_mon_data.gpu_to_affinity.get(&i);
                         if let Some(cpu_set) = cpu_set {
                             sched_setaffinity(
                                 nix::unistd::Pid::from_raw(proc_info.pid.try_into()?),
