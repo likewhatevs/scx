@@ -7,7 +7,6 @@ mod stats;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::ffi::CString;
 use std::fs;
 use std::io::Write;
@@ -33,14 +32,12 @@ use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::Skel;
 use libbpf_rs::skel::SkelBuilder;
 use libbpf_rs::MapCore as _;
-use libbpf_rs::MapHandle;
 use libbpf_rs::OpenObject;
 use libbpf_rs::ProgramInput;
 use log::debug;
 use log::info;
 use log::trace;
 use log::warn;
-use nvml_wrapper::Nvml;
 use scx_layered::*;
 use scx_stats::prelude::*;
 use scx_utils::compat;
@@ -65,7 +62,6 @@ use stats::LayerStats;
 use stats::StatsReq;
 use stats::StatsRes;
 use stats::SysStats;
-use sysinfo::System;
 
 const MAX_PATH: usize = bpf_intf::consts_MAX_PATH as usize;
 const MAX_COMM: usize = bpf_intf::consts_MAX_COMM as usize;
@@ -221,8 +217,6 @@ lazy_static! {
     };
 }
 
-static NVML_CELL: once_cell::sync::OnceCell<Nvml> = once_cell::sync::OnceCell::new();
-
 /// scx_layered: A highly configurable multi-layer sched_ext scheduler
 ///
 /// scx_layered allows classifying tasks into multiple layers and applying
@@ -301,11 +295,11 @@ static NVML_CELL: once_cell::sync::OnceCell<Nvml> = once_cell::sync::OnceCell::n
 /// - CmdJoin: Matches when the task uses pthread_setname_np to send a join/leave
 /// command to the scheduler. See examples/cmdjoin.c for more details.
 ///
-/// - UsingGpu: Bool. When true, matches if the task is using a gpu
-///   as of the last time NVML was polled. When false, inverted.
+/// - UsedGpuTid: Bool. When true, matches if the tasks which have used
+///   gpus by tid.
 ///
-/// - UsedGpu: Bool. When true, matches if the task has ever used a gpu
-///   as of the last time NVML was polled. When false, inverted.
+/// - UsedGpu: Bool. When true, matches if the tasks which have used gpu
+///   by tgid/pid.
 ///
 /// While there are complexity limitations as the matches are performed in
 /// BPF, it is straightforward to add more types of matches.
@@ -555,19 +549,6 @@ struct Opts {
     #[clap(long, default_value = "false")]
     enable_gpu_support: bool,
 
-    /// GPU Pid Poll Short Interval, if gpu support enabled.
-    #[clap(long, default_value = "180")]
-    gpu_poll_short_interval: u64,
-
-    /// On each user space update loop, use NVML to update GPU pids.
-    /// The alternative (and default) is to use loose heuristics
-    /// (i.e. start_time/existence of prior gpu process) to
-    /// reduce NVML calls (at the expense of scheduling accuracy).
-    /// This is to reduce the odds of taking systems offline due to NVML
-    /// triggering crashes when concurrently called.
-    #[clap(long, default_value = "false")]
-    aggressive_nvml_polling: bool,
-
     /// Enable netdev IRQ balancing. This is experimental and should be used with caution.
     #[clap(long, default_value = "false")]
     netdev_irq_balance: bool,
@@ -788,13 +769,6 @@ impl<'a, 'b> Sub<&'b BpfStats> for &'a BpfStats {
                 .collect(),
         }
     }
-}
-
-#[derive(Debug)]
-struct GpuMonData {
-    sysinfo_sys: sysinfo::System,
-    last_nvml_poll: std::time::SystemTime,
-    gpu_pid_to_start_time: HashMap<u32, u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -1156,8 +1130,6 @@ struct Scheduler<'a> {
     topo: Arc<Topology>,
     netdevs: BTreeMap<String, NetDev>,
     stats_server: StatsServer<StatsReq, StatsRes>,
-    opts: &'a Opts,
-    gpu_mon_data: GpuMonData,
 }
 
 impl<'a> Scheduler<'a> {
@@ -1236,13 +1208,13 @@ impl<'a> Scheduler<'a> {
                             mt.kind = bpf_intf::layer_match_kind_MATCH_IS_GROUP_LEADER as i32;
                             mt.is_group_leader.write(*polarity);
                         }
-                        LayerMatch::UsingGpu(polarity) => {
-                            mt.kind = bpf_intf::layer_match_kind_MATCH_USING_GPU as i32;
-                            mt.using_gpu.write(*polarity);
+                        LayerMatch::UsedGpuTid(polarity) => {
+                            mt.kind = bpf_intf::layer_match_kind_MATCH_USED_GPU_TID as i32;
+                            mt.used_gpu_tid.write(*polarity);
                         }
-                        LayerMatch::UsedGpu(polarity) => {
-                            mt.kind = bpf_intf::layer_match_kind_MATCH_USED_GPU as i32;
-                            mt.used_gpu.write(*polarity);
+                        LayerMatch::UsedGpuPid(polarity) => {
+                            mt.kind = bpf_intf::layer_match_kind_MATCH_USED_GPU_PID as i32;
+                            mt.used_gpu_pid.write(*polarity);
                         }
                     }
                 }
@@ -1848,14 +1820,6 @@ impl<'a> Scheduler<'a> {
         // Attach.
         let struct_ops = scx_ops_attach!(skel, layered)?;
         let stats_server = StatsServer::new(stats::server_data()).launch()?;
-        let gpu_mon_data = GpuMonData {
-            sysinfo_sys: System::new_with_specifics(
-                sysinfo::RefreshKind::new()
-                    .with_processes(sysinfo::ProcessRefreshKind::everything()),
-            ),
-            last_nvml_poll: std::time::SystemTime::now(),
-            gpu_pid_to_start_time: HashMap::new(),
-        };
 
         let sched = Self {
             struct_ops: Some(struct_ops),
@@ -1877,8 +1841,6 @@ impl<'a> Scheduler<'a> {
             topo,
             netdevs,
             stats_server,
-            opts,
-            gpu_mon_data,
         };
 
         info!("Layered Scheduler Attached. Run `scx_layered --monitor` for metrics.");
@@ -1938,141 +1900,6 @@ impl<'a> Scheduler<'a> {
             netdev.apply_cpumasks()?;
         }
 
-        Ok(())
-    }
-
-    fn update_gpu_pids(&mut self) -> Result<()> {
-        if !self.opts.enable_gpu_support {
-            return Ok(());
-        }
-
-        let nvml = NVML_CELL.get_or_try_init(|| {
-            Nvml::init().context("enabling GPU support requires a nvidia device")
-        })?;
-
-        let mut missing_gpu_pid = false;
-
-        if !self.opts.aggressive_nvml_polling {
-            self.gpu_mon_data
-                .sysinfo_sys
-                .refresh_processes_specifics(sysinfo::ProcessRefreshKind::new());
-            let current_pidmap = self.gpu_mon_data.sysinfo_sys.processes();
-            if self.gpu_mon_data.gpu_pid_to_start_time.is_empty() {
-                missing_gpu_pid = true;
-            } else {
-                for (k, v) in self.gpu_mon_data.gpu_pid_to_start_time.iter() {
-                    let k_pid = sysinfo::Pid::from_u32(*k);
-                    if current_pidmap.contains_key(&k_pid) {
-                        if *v < current_pidmap.get(&k_pid).unwrap().start_time() {
-                            missing_gpu_pid = true;
-                            break;
-                        }
-                    } else {
-                        missing_gpu_pid = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        let time_since_last_update = std::time::SystemTime::now()
-            .duration_since(self.gpu_mon_data.last_nvml_poll)?
-            .as_secs();
-        let since_last_update_short = time_since_last_update > self.opts.gpu_poll_short_interval;
-        let since_last_update_600s = time_since_last_update > 600;
-
-        if self.opts.aggressive_nvml_polling
-            || (missing_gpu_pid && since_last_update_short)
-            || (since_last_update_600s)
-        {
-            debug!("calling NVML to update GPU pids");
-            self.gpu_mon_data.last_nvml_poll = std::time::SystemTime::now();
-            let device_count = nvml.device_count()?;
-            let mut pids = HashSet::new();
-            // Iterate over all devices and gather running processes
-            for i in 0..device_count {
-                let device = nvml.device_by_index(i)?;
-                let procs = device.running_compute_processes()?;
-
-                for proc_info in procs {
-                    pids.insert(proc_info.pid);
-                }
-            }
-
-            // ensure current pids only have current pids.
-            let all_pid_bpf_map = MapHandle::try_from(&self.skel.maps.all_gpu_pid)?;
-            let cur_pid_bpf_map = MapHandle::try_from(&self.skel.maps.cur_gpu_pid)?;
-
-            // get deletes for current, state of the world for all.
-            let mut cur_pid_bpf_set = HashSet::new();
-            let mut all_pid_bpf_set = HashSet::new();
-
-            for key in cur_pid_bpf_map.keys() {
-                let sized_bytes: [u8; 4] = key
-                    .try_into()
-                    .expect("failed to convert pid bytes to sized bytes");
-                let pid: u32 = u32::from_ne_bytes(sized_bytes);
-                cur_pid_bpf_set.insert(pid);
-            }
-            for key in all_pid_bpf_map.keys() {
-                let sized_bytes: [u8; 4] = key
-                    .try_into()
-                    .expect("failed to convert pid bytes to sized bytes");
-                let pid: u32 = u32::from_ne_bytes(sized_bytes);
-                all_pid_bpf_set.insert(pid);
-            }
-
-            let cur_delete_set = cur_pid_bpf_set.difference(&pids);
-            let cur_add_set = pids.difference(&pids);
-            let all_add_set = pids.difference(&all_pid_bpf_set);
-
-            let zero_bytes = (0 as u32).to_ne_bytes();
-            use libbpf_rs::MapFlags;
-            for pid in cur_add_set.cloned() {
-                let pid_bytes = pid.to_ne_bytes();
-                cur_pid_bpf_map.update(&pid_bytes, &zero_bytes, MapFlags::ANY)?;
-            }
-
-            for pid in cur_delete_set.cloned() {
-                let pid_bytes = pid.to_ne_bytes();
-                cur_pid_bpf_map.delete(&pid_bytes)?;
-            }
-
-            for pid in all_add_set.cloned() {
-                let pid_bytes = pid.to_ne_bytes();
-                all_pid_bpf_map.update(&pid_bytes, &zero_bytes, MapFlags::ANY)?;
-            }
-            // bookkeeping for non-agressive mode
-            self.gpu_mon_data
-                .sysinfo_sys
-                .refresh_processes_specifics(sysinfo::ProcessRefreshKind::new());
-            self.gpu_mon_data.gpu_pid_to_start_time.clear();
-            for x in pids {
-                let x_pid = sysinfo::Pid::from_u32(x);
-                if self
-                    .gpu_mon_data
-                    .sysinfo_sys
-                    .processes()
-                    .contains_key(&x_pid)
-                {
-                    let proc = self
-                        .gpu_mon_data
-                        .sysinfo_sys
-                        .processes()
-                        .get(&x_pid)
-                        .unwrap();
-                    self.gpu_mon_data
-                        .gpu_pid_to_start_time
-                        .insert(x, proc.start_time());
-                } else {
-                    self.gpu_mon_data.gpu_pid_to_start_time.insert(x, 0);
-                }
-            }
-            debug!(
-                "GPU PIDs are: {:#?}",
-                self.gpu_mon_data.gpu_pid_to_start_time
-            );
-        }
         Ok(())
     }
 
@@ -2382,7 +2209,6 @@ impl<'a> Scheduler<'a> {
             self.processing_dur,
         )?;
         self.refresh_cpumasks()?;
-        self.update_gpu_pids()?;
         self.processing_dur += Instant::now().duration_since(started_at);
         Ok(())
     }
