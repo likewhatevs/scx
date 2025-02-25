@@ -1126,7 +1126,8 @@ void BPF_STRUCT_OPS(layered_enqueue, struct task_struct *p, u64 enq_flags)
 	 * if select_cpu() was skipped, direct dispatch to prev_cpu.
 	 */
 	if(!__COMPAT_is_enq_cpu_selected(enq_flags) || try_preempt_first) {
-		scx_bpf_dsq_insert(p, taskc->dsq_id, layer->slice_ns, 0);
+		scx_bpf_dsq_insert_vtime(p, taskc->dsq_id, layer->slice_ns, p->scx.dsq_vtime, 0);
+		return;
 	}
 
 	/*
