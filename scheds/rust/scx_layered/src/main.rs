@@ -28,9 +28,11 @@ pub use bpf_skel::*;
 use clap::Parser;
 use crossbeam::channel::RecvTimeoutError;
 use lazy_static::lazy_static;
+use libbpf_rs::libbpf_sys::bpf_program__set_autoload;
 use libbpf_rs::skel::OpenSkel;
 use libbpf_rs::skel::Skel;
 use libbpf_rs::skel::SkelBuilder;
+use libbpf_rs::AsRawLibbpf;
 use libbpf_rs::MapCore as _;
 use libbpf_rs::OpenObject;
 use libbpf_rs::ProgramInput;
@@ -50,6 +52,8 @@ use scx_utils::scx_ops_load;
 use scx_utils::scx_ops_open;
 use scx_utils::uei_exited;
 use scx_utils::uei_report;
+use std::collections::HashSet;
+use std::io::BufRead;
 use scx_utils::CoreType;
 use scx_utils::Cpumask;
 use scx_utils::Llc;
@@ -583,29 +587,19 @@ fn read_total_cpu(reader: &procfs::ProcReader) -> Result<procfs::CpuStat> {
         .ok_or_else(|| anyhow!("Could not read total cpu stat in proc"))
 }
 
-use std::collections::HashSet;
-use std::io::{BufRead, BufReader};
-
-/// enable all kprobes if all present
-fn enable_kprobes(skel: &BpfSkel, names: HashSet<String>) -> Result<()> {
-    let file = std::fs::File::open("/proc/kallsyms")?;
+fn sym_exists(sym: &str) -> bool {
+    let file = std::fs::File::open("/proc/kallsyms").expect("kallsyms missing");
     let reader = std::io::BufReader::new(file);
+    let mut syms_present: HashSet<String> = HashSet::new();
 
-    let all_syms_present = reader
-        .lines()
-        .map(|line| {
-            line.unwrap()
-                .split_whitespace()
-                .any(|token| names.contains(token))
-        })
-        .fold(true, |x, y| x && y);
-
-    if all_syms_present {    
-        bpf_program__set_autoload(skel, true);
-    } else {
-        warn!("Missing conditional kprobe, not setting autoload: {:#?}", names);
+    for line in reader.lines() {
+        for sym in line.unwrap().split_whitespace() {
+            syms_present.insert(sym.into());
+        }
     }
-    Ok(())
+
+    syms_present.contains(sym)
+
 }
 
 fn calc_util(curr: &procfs::CpuStat, prev: &procfs::CpuStat) -> Result<f64> {
@@ -1834,7 +1828,19 @@ impl<'a> Scheduler<'a> {
             ..Default::default()
         };
         let prog = &mut skel.progs.initialize_pid_namespace;
+
         let _ = prog.test_run(input);
+
+        if opts.enable_gpu_support {
+            if sym_exists("nvidia_open") {
+            unsafe {
+                bpf_program__set_autoload(skel.progs.save_gpu_tgid_pid.as_libbpf_object().as_ptr(),true);
+            }
+
+            } else {
+                warn!("--enable-gpu-support was set but nvidia_open symbol is missing.")
+            }
+        }
 
         // XXX If we try to refresh the cpumasks here before attaching, we
         // sometimes (non-deterministically) don't see the updated values in
