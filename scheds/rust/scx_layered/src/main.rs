@@ -583,6 +583,31 @@ fn read_total_cpu(reader: &procfs::ProcReader) -> Result<procfs::CpuStat> {
         .ok_or_else(|| anyhow!("Could not read total cpu stat in proc"))
 }
 
+use std::collections::HashSet;
+use std::io::{BufRead, BufReader};
+
+/// enable all kprobes if all present
+fn enable_kprobes(skel: &BpfSkel, names: HashSet<String>) -> Result<()> {
+    let file = std::fs::File::open("/proc/kallsyms")?;
+    let reader = std::io::BufReader::new(file);
+
+    let all_syms_present = reader
+        .lines()
+        .map(|line| {
+            line.unwrap()
+                .split_whitespace()
+                .any(|token| names.contains(token))
+        })
+        .fold(true, |x, y| x && y);
+
+    if all_syms_present {    
+        bpf_program__set_autoload(skel, true);
+    } else {
+        warn!("Missing conditional kprobe, not setting autoload: {:#?}", names);
+    }
+    Ok(())
+}
+
 fn calc_util(curr: &procfs::CpuStat, prev: &procfs::CpuStat) -> Result<f64> {
     match (curr, prev) {
         (

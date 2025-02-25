@@ -192,7 +192,7 @@ struct {
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 } gpu_tid SEC(".maps");
 
-SEC("kprobe/nvidia_open")
+SEC("?kprobe/nvidia_open")
 int save_gpu_tgid_pid() {
 	if (!enable_gpu_support)
 		return 0;
