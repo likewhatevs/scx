@@ -67,3 +67,9 @@ jobs:
       - if: ${{ steps.cache-kernel.outputs.cache-hit != 'true' }}
       # Generate kernel headers
         run: cd linux && make headers
+
+
+      - if: ${{ steps.cache-kernel.outputs.cache-hit != 'true' }}
+        name: Run selftests
+        run: cd linux && virtme-ng  -r . --  bash -c 'make -C tools/testing/selftests/sched_ext run_tests'
+
