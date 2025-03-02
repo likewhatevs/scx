@@ -70,7 +70,10 @@ jobs:
 
 
       - if: ${{ steps.cache-kernel.outputs.cache-hit != 'true' }}
-        name: Run selftests
+        name: Run sched selftests
         run: cd linux && make -C tools/testing/selftests/sched run_tests
+
+      - if: ${{ steps.cache-kernel.outputs.cache-hit != 'true' }}
+        name: Run sched_ext selftests
         run: cd linux && make -C tools/testing/selftests/sched_ext run_tests
 
