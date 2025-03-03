@@ -34,9 +34,9 @@ impl LayerSpec {
                 .open(input.split_once(':').unwrap().1)?;
             let mut content = String::new();
             f.read_to_string(&mut content)?;
-            serde_json::from_str(&content)?
+            serde_hjson::from_str(&content)?
         } else {
-            serde_json::from_str(input)?
+            serde_hjson::from_str(input)?
         };
         Ok(config.specs)
     }
