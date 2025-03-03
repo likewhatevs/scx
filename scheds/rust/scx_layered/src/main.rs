@@ -65,8 +65,6 @@ use stats::LayerStats;
 use stats::StatsReq;
 use stats::StatsRes;
 use stats::SysStats;
-use std::collections::HashSet;
-use std::io::BufRead;
 
 const MAX_PATH: usize = bpf_intf::consts_MAX_PATH as usize;
 const MAX_COMM: usize = bpf_intf::consts_MAX_COMM as usize;
@@ -600,28 +598,15 @@ fn read_total_cpu(reader: &procfs::ProcReader) -> Result<procfs::CpuStat> {
         .ok_or_else(|| anyhow!("Could not read total cpu stat in proc"))
 }
 
-fn cond_kprobe_enable<T>(sym: &str, prog_ptr: &OpenProgramImpl<T>) {
-    if sym_exists(sym) {
+fn cond_kprobe_enable<T>(sym: &str, prog_ptr: &OpenProgramImpl<T>) -> Result<()> {
+    if compat::ksym_exists(sym)? {
         unsafe {
             bpf_program__set_autoload(prog_ptr.as_libbpf_object().as_ptr(), true);
         }
     } else {
         warn!("symbol {} missing, kprobe not loaded", sym);
     }
-}
-
-fn sym_exists(sym: &str) -> bool {
-    let file = std::fs::File::open("/proc/kallsyms").expect("kallsyms missing");
-    let reader = std::io::BufReader::new(file);
-    let mut syms_present: HashSet<String> = HashSet::new();
-
-    for line in reader.lines() {
-        for sym in line.unwrap().split_whitespace() {
-            syms_present.insert(sym.into());
-        }
-    }
-
-    syms_present.contains(sym)
+    Ok(())
 }
 
 fn calc_util(curr: &procfs::CpuStat, prev: &procfs::CpuStat) -> Result<f64> {
@@ -1733,9 +1718,9 @@ impl<'a> Scheduler<'a> {
         // enable autoloads for conditionally loaded things
         // immediately after creating skel (because this is always before loading)
         if opts.enable_gpu_support {
-            cond_kprobe_enable("nvidia_open", &skel.progs.kprobe_nvidia_open);
-            cond_kprobe_enable("nvidia_poll", &skel.progs.kprobe_nvidia_poll);
-            cond_kprobe_enable("nvidia_mmap", &skel.progs.kprobe_nvidia_mmap);
+            cond_kprobe_enable("nvidia_open", &skel.progs.kprobe_nvidia_open)?;
+            cond_kprobe_enable("nvidia_poll", &skel.progs.kprobe_nvidia_poll)?;
+            cond_kprobe_enable("nvidia_mmap", &skel.progs.kprobe_nvidia_mmap)?;
         }
 
         skel.maps.rodata_data.slice_ns = scx_enums.SCX_SLICE_DFL;
