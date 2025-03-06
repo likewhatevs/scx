@@ -1293,6 +1293,14 @@ impl<'a> Scheduler<'a> {
                     }
                     layer.llc_mask |= llcmask_from_llcs(&topo_node.llcs) as u64;
                 }
+                // HACK -- to prevent stalls w/ allow node aligned, mirror LLC allocations
+                // across numa nodes in a way that should work for dual socket servers
+                // regardless of LLC/CPU numbering.
+                if *allow_node_aligned {
+                    let mut llc_bytes = layer.llc_mask.to_ne_bytes();
+                    llc_bytes.reverse();
+                    layer.llc_mask = u64::from_ne_bytes(llc_bytes);
+                }
             }
 
             perf_set |= layer.perf > 0;
