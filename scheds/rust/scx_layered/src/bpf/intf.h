@@ -246,6 +246,7 @@ enum layer_match_kind {
 	MATCH_IS_GROUP_LEADER,
 	MATCH_USED_GPU_TID,
 	MATCH_USED_GPU_PID,
+	MATCH_GPU_NUMA_DOM,
 
 	NR_LAYER_MATCH_KINDS,
 };
@@ -309,6 +310,7 @@ struct layer {
 
 	u64			cpus_seq;
 	u64			node_mask;
+	u64 		node_id;
 	u64			llc_mask;
 	bool			check_no_idle;
 	u32			perf;

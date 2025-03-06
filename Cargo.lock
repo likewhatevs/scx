@@ -2312,6 +2312,7 @@ dependencies = [
  "libbpf-rs",
  "libc",
  "log",
+ "nvml-wrapper",
  "once_cell",
  "scx_stats",
  "scx_stats_derive",

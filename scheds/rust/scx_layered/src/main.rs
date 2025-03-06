@@ -8,6 +8,8 @@ mod stats;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::ffi::CString;
+use libbpf_rs::MapHandle;
+use libbpf_rs::MapFlags;
 use std::fs;
 use std::io::Write;
 use std::mem::MaybeUninit;
@@ -41,6 +43,7 @@ use log::warn;
 use scx_layered::*;
 use scx_stats::prelude::*;
 use scx_utils::compat;
+use nvml_wrapper::Nvml;
 use scx_utils::import_enums;
 use scx_utils::init_libbpf_logging;
 use scx_utils::read_netdevs;
@@ -87,6 +90,8 @@ const NR_LSTATS: usize = bpf_intf::layer_stat_id_NR_LSTATS as usize;
 const NR_LLC_LSTATS: usize = bpf_intf::llc_layer_stat_id_NR_LLC_LSTATS as usize;
 
 const NR_LAYER_MATCH_KINDS: usize = bpf_intf::layer_match_kind_NR_LAYER_MATCH_KINDS as usize;
+
+static NVML_CELL: once_cell::sync::OnceCell<Nvml> = once_cell::sync::OnceCell::new();
 
 lazy_static! {
     static ref USAGE_DECAY: f64 = 0.5f64.powf(1.0 / USAGE_HALF_LIFE_F64);
@@ -560,6 +565,10 @@ struct Opts {
     /// Enable gpu support
     #[clap(long, default_value = "false")]
     enable_gpu_support: bool,
+
+    /// Minimum amount of time between NVML calls.
+    #[clap(long, default_value = "30")]
+    nvml_call_time: u64,
 
     /// Enable netdev IRQ balancing. This is experimental and should be used with caution.
     #[clap(long, default_value = "false")]
@@ -1123,6 +1132,10 @@ impl Layer {
     }
 }
 
+struct GpuMonData {
+    last_nvml_time: std::time::Instant,
+}
+
 struct Scheduler<'a> {
     skel: BpfSkel<'a>,
     struct_ops: Option<libbpf_rs::Link>,
@@ -1142,6 +1155,8 @@ struct Scheduler<'a> {
     topo: Arc<Topology>,
     netdevs: BTreeMap<String, NetDev>,
     stats_server: StatsServer<StatsReq, StatsRes>,
+    opts: &'a Opts,
+    gpu_mon_data: GpuMonData,
 }
 
 impl<'a> Scheduler<'a> {
@@ -1842,6 +1857,7 @@ impl<'a> Scheduler<'a> {
         // Attach.
         let struct_ops = scx_ops_attach!(skel, layered)?;
         let stats_server = StatsServer::new(stats::server_data()).launch()?;
+        let gpu_mon_data = GpuMonData{last_nvml_time: std::time::Instant::now()};
 
         let sched = Self {
             struct_ops: Some(struct_ops),
@@ -1863,6 +1879,8 @@ impl<'a> Scheduler<'a> {
             topo,
             netdevs,
             stats_server,
+            opts,
+            gpu_mon_data,
         };
 
         info!("Layered Scheduler Attached. Run `scx_layered --monitor` for metrics.");
@@ -1920,6 +1938,42 @@ impl<'a> Scheduler<'a> {
                 trace!("{} updating irq {} cpumask {:?}", iface, irq, irqmask);
             }
             netdev.apply_cpumasks()?;
+        }
+
+        Ok(())
+    }
+
+    fn update_gpu_pid_localities(&mut self) -> Result<()> {
+        if !self.opts.enable_gpu_support {
+            return Ok(());
+        }
+
+        let nvml_cb = self.gpu_mon_data.last_nvml_time + std::time::Duration::from_secs(self.opts.nvml_call_time);
+
+        if std::time::Instant::now() > nvml_cb {
+            return Ok(());
+        }
+
+        let nvml = NVML_CELL.get_or_try_init(|| {
+            Nvml::init().context("enabling GPU support requires a nvidia device")
+        })?;
+        let gpu_pid = MapHandle::try_from(&self.skel.maps.gpu_tgid)?;
+        let gpu_pid_nodemask = MapHandle::try_from(&self.skel.maps.gpu_pid_nodemask)?;
+
+        if gpu_pid.keys().count() != gpu_pid_numa_dom.keys().count()
+        {
+            info!("Updating gpu numa domain map due to length mismatch");
+            let device_count = nvml.device_count()?;
+            for i in 0..device_count {
+                let dom_bytes = i.to_ne_bytes();
+                let device = nvml.device_by_index(i)?;
+                let procs = device.running_compute_processes()?;
+
+                for proc_info in procs {
+                    let pid_bytes = proc_info.pid.to_ne_bytes();
+                    gpu_pid_numa_dom.update(&pid_bytes, &dom_bytes, MapFlags::ANY)?;
+                }
+            }
         }
 
         Ok(())
@@ -2231,6 +2285,7 @@ impl<'a> Scheduler<'a> {
             self.processing_dur,
         )?;
         self.refresh_cpumasks()?;
+        self.update_gpu_pid_localities()?;
         self.processing_dur += Instant::now().duration_since(started_at);
         Ok(())
     }

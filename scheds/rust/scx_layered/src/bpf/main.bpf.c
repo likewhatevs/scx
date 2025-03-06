@@ -192,6 +192,14 @@ struct {
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 } gpu_tid SEC(".maps");
 
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__type(key, u32);
+	__type(value, u32);
+	__uint(max_entries, MAX_GPU_PIDS);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+} gpu_pid_numa_dom SEC(".maps");
+
 int save_gpu_tgid_pid() {
 	if (!enable_gpu_support)
 		return 0;
@@ -1769,10 +1777,13 @@ void BPF_STRUCT_OPS(layered_dispatch, s32 cpu, struct task_struct *prev)
 }
 
 static __noinline bool match_one(struct layer_match *match,
-				 struct task_struct *p, const char *cgrp_path)
+				 struct task_struct *p, const char *cgrp_path, u32 layer_id)
 {
+	struct layer *layer;
 	bool result = false;
 	const struct cred *cred;
+
+	layer = &layers[layer_id];
 
 	switch (match->kind) {
 	case MATCH_CGROUP_PREFIX: {
@@ -1886,6 +1897,32 @@ static __noinline bool match_one(struct layer_match *match,
 
 			if (bpf_map_lookup_elem(&gpu_tgid, &tgid))
 				pid_present = true;
+
+			return pid_present == match->used_gpu_pid;
+	}
+	case MATCH_GPU_NUMA_DOM: {
+			u32 tgid;
+			bool pid_present = false;
+			u32 *pid_numa_dom;
+
+			if (!enable_gpu_support)
+				scx_bpf_error("UsedGpuPid requires --enable_gpu_support");
+
+			tgid = p->tgid;
+
+			if (bpf_map_lookup_elem(&gpu_tgid, &tgid))
+				pid_present = true;
+
+			if(!pid_present)
+				return false;
+
+			pid_numa_dom = bpf_map_lookup_elem(&gpu_pid_numa_dom, &tgid);
+
+			if (!pid_numa_dom)
+				return false;
+
+			if (*pid_numa_dom == layer->)
+
 
 			return pid_present == match->used_gpu_pid;
 	}
