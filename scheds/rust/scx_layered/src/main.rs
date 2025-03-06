@@ -1293,14 +1293,6 @@ impl<'a> Scheduler<'a> {
                     }
                     layer.llc_mask |= llcmask_from_llcs(&topo_node.llcs) as u64;
                 }
-                // HACK -- to prevent stalls w/ allow node aligned, mirror LLC allocations
-                // across numa nodes in a way that should work for dual socket servers
-                // regardless of LLC/CPU numbering.
-                if *allow_node_aligned {
-                    let mut rev_llc_bytes = layer.llc_mask.to_ne_bytes();
-                    rev_llc_bytes.reverse();
-                    layer.llc_mask |= u64::from_ne_bytes(rev_llc_bytes);
-                }
             }
 
             perf_set |= layer.perf > 0;
@@ -1885,6 +1877,18 @@ impl<'a> Scheduler<'a> {
                 bpf_layer.cpus[cpu / 8] |= 1 << (cpu % 8);
             } else {
                 bpf_layer.cpus[cpu / 8] &= !(1 << (cpu % 8));
+            }
+        }
+
+        // HACK -- to prevent stalls w/ allow node aligned, mirror LLC allocations
+        // across numa nodes in a way that should work for dual socket servers
+        // regardless of LLC/CPU numbering.
+        let ana = unsafe { bpf_layer.allow_node_aligned.assume_init() };
+        if ana {
+            let mut new_cpus = bpf_layer.cpus;
+            new_cpus.reverse();
+            for i in 0..8 {
+                bpf_layer.cpus[i] |= new_cpus[i];
             }
         }
 
