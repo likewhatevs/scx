@@ -1297,9 +1297,9 @@ impl<'a> Scheduler<'a> {
                 // across numa nodes in a way that should work for dual socket servers
                 // regardless of LLC/CPU numbering.
                 if *allow_node_aligned {
-                    let mut llc_bytes = layer.llc_mask.to_ne_bytes();
-                    llc_bytes.reverse();
-                    layer.llc_mask = u64::from_ne_bytes(llc_bytes);
+                    let mut rev_llc_bytes = layer.llc_mask.to_ne_bytes();
+                    rev_llc_bytes.reverse();
+                    layer.llc_mask |= u64::from_ne_bytes(rev_llc_bytes);
                 }
             }
 
