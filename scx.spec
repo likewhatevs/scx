@@ -24,7 +24,7 @@ cargo build --release -p scx_*
 rm -f target/release/*.d
 
 %install
-mkdir -p %{buildroot}/usr/bin
+mkdir -p %{buildroot}/usr/bin %{buildroot}/usr/include/scx
 install -m 0755 target/release/scx_* %{buildroot}/usr/bin/
 install -m 0644 scheds/include/scx/*.h %{buildroot}/usr/include/scx/
 
