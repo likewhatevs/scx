@@ -10,7 +10,7 @@ License:	GPLv2
 URL:		https://github.com/likewhatevs/scx
 Source0:	${nil}
 
-BuildRequires: cargo, rust, elfutils-devel, clang
+BuildRequires: cargo, rust, elfutils-devel, clang, sed, findutils
 
 %description
 scx schedulers packaged to simplify perf testing
@@ -22,6 +22,8 @@ scx schedulers packaged to simplify perf testing
 export RUSTFLAGS="%build_rustflags"
 cargo build --release -p scx_*
 rm -f target/release/*.d
+find scheds/include/scx -type f -exec sed -i 's|\.\./vmlinux\.h|vmlinux.h|g' {} +
+
 
 %install
 mkdir -p %{buildroot}/usr/bin %{buildroot}/usr/include/scx
