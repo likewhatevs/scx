@@ -2917,6 +2917,17 @@ fn expand_template(rule: &LayerMatch) -> Result<Vec<(LayerMatch, Cpumask)>> {
                 )
             })
             .collect()),
+        LayerMatch::CgroupPrefix(prefix) => Ok(traverse_sysfs(Path::new("/sys/fs/cgroup"))?
+            .into_iter()
+            .map(|cgroup| String::from(cgroup.to_str().expect("could not parse cgroup path")))
+            .filter(|cgroup| cgroup.starts_with(prefix))
+            .map(|cgroup| {
+                (
+                    LayerMatch::CgroupPrefix(cgroup.clone()),
+                    find_cpumask(&cgroup),
+                )
+            })
+            .collect()),
         _ => panic!("Unimplemented template enum {:?}", rule),
     }
 }
