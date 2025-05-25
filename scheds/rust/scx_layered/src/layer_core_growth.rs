@@ -109,7 +109,7 @@ fn parse_cpu_ranges(s: &str) -> Result<BTreeSet<usize>> {
     Ok(cpus)
 }
 
-fn collect_cpuset_effective() -> Result<BTreeSet<BTreeSet<usize>>> {
+pub fn collect_cpuset_effective() -> Result<BTreeSet<BTreeSet<usize>>> {
     let mut result = BTreeSet::new();
 
     for entry in WalkDir::new("/sys/fs/cgroup") {

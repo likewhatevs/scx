@@ -1,9 +1,9 @@
 [
 	{
 		"name": "template",
-		"template": { "CgroupSuffix": "common_suffix/" },
+		"template": { "CgroupSuffix": "scope" },
 		"matches": [
-			[{ "CgroupPrefix": "top_level/" }]
+			[]
 		],
 		"kind": {
 			"Grouped": {

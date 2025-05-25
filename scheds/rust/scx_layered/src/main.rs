@@ -12,8 +12,6 @@ use std::fs;
 use std::io::Write;
 use std::mem::MaybeUninit;
 use std::ops::Sub;
-use std::path::Path;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -2874,30 +2872,39 @@ fn verify_layer_specs(specs: &[LayerSpec]) -> Result<()> {
     Ok(())
 }
 
-fn traverse_sysfs(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut paths = vec![];
-
-    if !dir.is_dir() {
-        panic!("path {:?} does not correspond to directory", dir);
+fn remove_prefix(s: &str, prefix: &str) -> String {
+    if s.starts_with(prefix) {
+        s[prefix.len()..].to_string()
+    } else {
+        s.to_string()
     }
+}
 
-    let direntries = fs::read_dir(dir)?;
-
-    for entry in direntries {
-        let path = entry?.path();
-        if path.is_dir() {
-            paths.append(&mut traverse_sysfs(&path)?);
-        } else {
-            paths.push(path);
-        }
-    }
-
-    Ok(paths)
+fn collect_effective_cpuset_paths() -> Vec<String> {
+    walkdir::WalkDir::new("/sys/fs/cgroup")
+        .into_iter()
+        .filter_map(|x| x.ok())
+        .filter(|x| x.file_name() == "cpuset.cpus.effective")
+        .filter_map(|x| {
+            if let Some(x) = x.clone().path().parent() {
+                let cgrp = remove_prefix(x.display().to_string().as_str(), "/sys/fs/cgroup");
+                if cgrp.len() > 64 {
+                    log::warn!("ignoring cgroup {}", cgrp);
+                    None
+                } else {
+                    Some(cgrp)
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn find_cpumask(cgroup: &str) -> Cpumask {
-    let mut path = String::from(cgroup);
-    path.push_str("cpuset.cpus.effective");
+    let mut path = String::from("/sys/fs/cgroup");
+    path.push_str(cgroup);
+    path.push_str("/cpuset.cpus.effective");
 
     let description = fs::read_to_string(&mut path).unwrap();
 
@@ -2906,9 +2913,8 @@ fn find_cpumask(cgroup: &str) -> Cpumask {
 
 fn expand_template(rule: &LayerMatch) -> Result<Vec<(LayerMatch, Cpumask)>> {
     match rule {
-        LayerMatch::CgroupSuffix(suffix) => Ok(traverse_sysfs(Path::new("/sys/fs/cgroup"))?
+        LayerMatch::CgroupSuffix(suffix) => Ok(collect_effective_cpuset_paths()
             .into_iter()
-            .map(|cgroup| String::from(cgroup.to_str().expect("could not parse cgroup path")))
             .filter(|cgroup| cgroup.ends_with(suffix))
             .map(|cgroup| {
                 (
@@ -2917,9 +2923,8 @@ fn expand_template(rule: &LayerMatch) -> Result<Vec<(LayerMatch, Cpumask)>> {
                 )
             })
             .collect()),
-        LayerMatch::CgroupPrefix(prefix) => Ok(traverse_sysfs(Path::new("/sys/fs/cgroup"))?
+        LayerMatch::CgroupPrefix(prefix) => Ok(collect_effective_cpuset_paths()
             .into_iter()
-            .map(|cgroup| String::from(cgroup.to_str().expect("could not parse cgroup path")))
             .filter(|cgroup| cgroup.starts_with(prefix))
             .map(|cgroup| {
                 (
