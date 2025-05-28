@@ -91,7 +91,7 @@ __hidden __noinline int clamp_pathind(int i)
 	return i > 0 ? i % MAX_PATH : 0;
 }
 
-bool __noinline match_prefix_suffix(const char *prefix, const char *str, bool match_suffix)
+bool __noinline match_prefix_suffix(const char *prefix, const char *str, enum MatchType match_type)
 {
 	u32 c, zero = 0;
 	int str_len, match_str_len, offset, i;
@@ -126,19 +126,27 @@ bool __noinline match_prefix_suffix(const char *prefix, const char *str, bool ma
 
 	offset = 0;
 
-	if (match_suffix)
+	if (match_type == STR_SUFFIX)
 		offset = str_len - match_str_len;
 
 	// use MAX_PATH instead of str_len for when
 	// prefix/suffix == string.
 	bpf_for(c, offset, MAX_PATH) {
-		i = c - offset;
+		if (match_type == STR_SUFFIX || match_type == STR_PREFIX)
+			i = c - offset;
+		if (match_type == STR_SUBSTR)
+			i = offset;
 
 		if (match_buf[clamp_pathind(i)] == '\0')
 			return true;
 
-		if (str_buf[clamp_pathind(c)] != match_buf[clamp_pathind(i)])
+		if (str_buf[clamp_pathind(c)] != match_buf[clamp_pathind(i)]) {
+			if (match_type == STR_SUBSTR) {
+				offset = 0;
+				continue;
+			}
 			return false;
+		}
 	}
 	return false;
 }
