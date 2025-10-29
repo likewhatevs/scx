@@ -1103,12 +1103,13 @@ void BPF_STRUCT_OPS(mitosis_running, struct task_struct *p)
 	struct cell	*cell;
 
 	if (!(tctx = lookup_task_ctx(p)) || !(cctx = lookup_cpu_ctx(-1)) ||
-	    !(cell = lookup_cell(cctx->cell)))
+	    /* Get the tasks cell to update it's vtime */
+	    !(cell = lookup_cell(tctx->cell)))
 		return;
 
 	/*
-	 * Update both the CPU's cell and the cpu's vtime so the vtime's are
-	 * comparable at dispatch time.
+	 * Update both the task's cell's vtime and the cpu's vtime so the 
+	 * vtime's are comparable at dispatch time.
 	 */
 	if (time_before(READ_ONCE(cell->vtime_now), p->scx.dsq_vtime))
 		WRITE_ONCE(cell->vtime_now, p->scx.dsq_vtime);
