@@ -317,12 +317,21 @@ pub fn dsq_slice_ns(dsq_index: u64, min_slice_us: u64, dsq_shift: u64) -> u64 {
 
 #[macro_export]
 macro_rules! init_open_skel {
-    ($skel: expr, $topo: expr, $opts: expr, $verbose: expr, $hw_profile: expr) => {
+    ($skel: expr, $topo: expr, $sched_opts: expr, $cli_opts: expr, $hw_profile: expr) => {
         'block: {
             let skel = &mut *$skel;
-            let opts: &$crate::SchedulerOpts = $opts;
-            let verbose: u8 = $verbose;
+            let opts: &$crate::SchedulerOpts = $sched_opts;
+            let cli_opts = $cli_opts;
             let hw_profile: &$crate::HardwareProfile = $hw_profile;
+
+            // Derive debug settings from CLI options
+            let verbose: u8 = if cli_opts.log_level.contains("trace") {
+                2
+            } else if cli_opts.log_level.contains("debug") {
+                1
+            } else {
+                0
+            };
 
             if opts.init_dsq_index > opts.dumb_queues - 1 {
                 break 'block ::anyhow::Result::Err(::anyhow::anyhow!(
@@ -425,6 +434,8 @@ macro_rules! init_open_skel {
             rodata.p2dq_config.keep_running_enabled = MaybeUninit::new(opts.keep_running);
 
             rodata.debug = verbose as u32;
+            rodata.trace_enabled = verbose > 1;
+            rodata.debug_enabled = verbose >= 1;
             rodata.nr_cpu_ids = *NR_CPU_IDS as u32;
 
             Ok(())

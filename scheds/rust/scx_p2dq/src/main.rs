@@ -35,7 +35,7 @@ use scx_utils::uei_report;
 use scx_utils::Topology;
 use scx_utils::UserExitInfo;
 use scx_utils::NR_CPU_IDS;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use tracing_subscriber::filter::EnvFilter;
 
 use bpf_intf::stat_idx_P2DQ_NR_STATS;
@@ -105,6 +105,7 @@ struct Scheduler<'a> {
     debug_level: u8,
 
     stats_server: StatsServer<(), Metrics>,
+    last_debug_pos: u32,
 }
 
 impl<'a> Scheduler<'a> {
@@ -151,11 +152,19 @@ impl<'a> Scheduler<'a> {
             hw_profile.optimize_scheduler_opts(&mut opts_optimized);
         }
 
+        // Create compatibility struct for macro requirements
+        struct CompatCliOpts {
+            log_level: String,
+        }
+        let cli_opts_compat = CompatCliOpts {
+            log_level: log_level.to_string(),
+        };
+
         scx_p2dq::init_open_skel!(
             &mut open_skel,
             topo,
             &opts_optimized,
-            debug_level,
+            &cli_opts_compat,
             &hw_profile
         )?;
 
@@ -174,6 +183,7 @@ impl<'a> Scheduler<'a> {
             struct_ops: None,
             debug_level,
             stats_server,
+            last_debug_pos: 0,
         })
     }
 
@@ -213,14 +223,232 @@ impl<'a> Scheduler<'a> {
         }
     }
 
+    fn process_debug_events(&mut self) {
+        // Fix issue #4: Use consistent debug level check with BPF boolean flags
+        if self.debug_level == 0 {
+            return;
+        }
+
+        // Fix issues #1 & #2: Read current debug_event_pos from BPF to determine valid events
+        // This avoids race conditions and unreliable timestamp == 0 checks
+        let current_debug_pos = unsafe {
+            let ptr = &self.skel.maps.bss_data.as_ref().unwrap().debug_event_pos as *const u32;
+            (ptr as *const std::sync::atomic::AtomicU32)
+                .as_ref()
+                .unwrap()
+                .load(std::sync::atomic::Ordering::Acquire)
+        };
+
+        let debug_events_map = &self.skel.maps.debug_events;
+        let buf_size = bpf_intf::consts_DEBUG_EVENTS_BUF_SIZE as u32;
+        let mut events_found = 0;
+
+        // Calculate how many new events to process (handles wraparound automatically)
+        let events_to_process = current_debug_pos.wrapping_sub(self.last_debug_pos);
+
+        // Process up to buffer size events to avoid infinite loops
+        let events_to_process = std::cmp::min(events_to_process, buf_size);
+
+        for _ in 0..events_to_process {
+            let key = (self.last_debug_pos % buf_size) as usize;
+
+            match debug_events_map.lookup(&(key as u32).to_ne_bytes(), libbpf_rs::MapFlags::ANY) {
+                Ok(Some(data)) => {
+                    if data.len() >= std::mem::size_of::<bpf_intf::debug_event>() {
+                        let event = unsafe {
+                            std::ptr::read(data.as_ptr() as *const bpf_intf::debug_event)
+                        };
+
+                        // Process event using position-based approach (no timestamp check needed)
+                        events_found += 1;
+                        self.format_debug_event(&event);
+
+                        self.last_debug_pos = self.last_debug_pos.wrapping_add(1);
+                    }
+                }
+                _ => {
+                    self.last_debug_pos = self.last_debug_pos.wrapping_add(1);
+                }
+            }
+        }
+
+        if events_found > 0 {
+            debug!("Processed {} debug events from BPF", events_found);
+        }
+    }
+
+    fn format_debug_event(&self, event: &bpf_intf::debug_event) {
+        let timestamp = event.timestamp; // Copy to avoid packed field reference
+        let timestamp_ms = timestamp / 1_000_000; // Convert ns to ms
+        let event_type = event.event_type; // Copy to avoid packed field reference
+        let args = event.args; // Copy array to avoid packed field reference
+
+        match event_type {
+            bpf_intf::debug_event_type_TRACE_EVENT_ENQUEUE_TASK_WEIGHT_SLICE_VTIME_LLC_VTIME => {
+                trace!(
+                    "[{}ms] ENQUEUE: pid={} weight={} slice_ns={} vtime={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_DISPATCH_CPU_MIN_VTIME_DSQ_ATQ => {
+                trace!(
+                    "[{}ms] DISPATCH: cpu={} min_vtime={} dsq_id={} atq={:#x}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_RUNNING_PID_CPU_MIGRATION_LLC_MIGRATION => {
+                trace!(
+                    "[{}ms] RUNNING: pid={} cpu={} task_cpu={} llc_id={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_STOPPING_TASK_WEIGHT_SLICE_USED_SCALED => {
+                trace!(
+                    "[{}ms] STOPPING: pid={} weight={} slice_ns={} used_ns={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_SELECT_CPU_PID_COMM_PREV_TO_NEW_IDLE => {
+                trace!(
+                    "[{}ms] SELECT_CPU: pid={} prev_cpu={} new_cpu={} idle={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3]
+                );
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_ATQ_CREATED_FOR_LLC => {
+                debug!(
+                    "[{}ms] ATQ_CREATED: atq={:#x} llc_id={}",
+                    timestamp_ms, args[0], args[1]
+                );
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_ATQ_FAILED_TO_GET_PID => {
+                debug!("[{}ms] ATQ_FAILED: pid={}", timestamp_ms, args[0]);
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_ATQ_INSERT_TASK_TO_QUEUE => {
+                trace!(
+                    "[{}ms] ATQ_INSERT: atq={:#x} pid={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_PICK2_CPU_FIRST_SECOND_LOAD => {
+                trace!(
+                    "[{}ms] PICK2: cpu={} first_llc={} first_load={} second_llc={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_DSQ_INDEX_INCREMENT_FOR_TASK => {
+                trace!(
+                    "[{}ms] DSQ_INC: pid={} from_idx={} to_idx={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_DSQ_INDEX_DECREMENT_FOR_TASK => {
+                trace!(
+                    "[{}ms] DSQ_DEC: pid={} from_idx={} to_idx={}",
+                    timestamp_ms,
+                    args[0],
+                    args[1],
+                    args[2]
+                );
+            }
+            bpf_intf::debug_event_type_TRACE_EVENT_PREFERRED_CPU_IDLE_FOR_TASK => {
+                trace!("[{}ms] PREFERRED_CPU: cpu={}", timestamp_ms, args[0]);
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_CONFIG_NODE_CONFIGURED => {
+                debug!("[{}ms] NODE_CONFIG: node_id={}", timestamp_ms, args[0]);
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_CONFIG_CPU_NODE_LLC_INITIALIZED => {
+                debug!(
+                    "[{}ms] CPU_INIT: cpu={} node_id={} llc_id={}",
+                    timestamp_ms, args[0], args[1], args[2]
+                );
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_CPU_IS_BIG_CORE => {
+                debug!("[{}ms] BIG_CORE: cpu={}", timestamp_ms, args[0]);
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_LOAD_BALANCE_LLC_CONTEXT => {
+                debug!(
+                    "[{}ms] LB_LLC: llc_id={} load={} lb_llc_id={} lb_load={}",
+                    timestamp_ms, args[0], args[1], args[2], args[3]
+                );
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_LOAD_BALANCE_TOTAL_LOAD_INTERACTIVE => {
+                debug!(
+                    "[{}ms] LB_TOTAL: load_sum={} interactive_sum={}",
+                    timestamp_ms, args[0], args[1]
+                );
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_LOAD_BALANCE_AUTOSLICE_IDEAL_SUM => {
+                debug!(
+                    "[{}ms] AUTOSLICE_IDEAL: ideal_sum={} interactive_sum={}",
+                    timestamp_ms, args[0], args[1]
+                );
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_LOAD_BALANCE_AUTOSLICE_INTERACTIVE_SLICE => {
+                debug!(
+                    "[{}ms] AUTOSLICE_SLICE: dsq_idx={} slice_ns={}",
+                    timestamp_ms, args[0], args[1]
+                );
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_TIMER_STOPPED_FOR_KEY => {
+                debug!("[{}ms] TIMER_STOPPED: key={}", timestamp_ms, args[0]);
+            }
+            bpf_intf::debug_event_type_DEBUG_EVENT_CONFIG_CREATING_AFFINITY_CPU_DSQ => {
+                debug!(
+                    "[{}ms] CREATE_AFFN_DSQ: cpu={} dsq_id={}",
+                    timestamp_ms, args[0], args[1]
+                );
+            }
+            _ => {
+                debug!(
+                    "[{}ms] UNKNOWN_EVENT: type={} args=[{}, {}, {}, {}]",
+                    timestamp_ms, event_type, args[0], args[1], args[2], args[3]
+                );
+            }
+        }
+    }
+
     fn run(&mut self, shutdown: Arc<AtomicBool>) -> Result<UserExitInfo> {
         let (res_ch, req_ch) = self.stats_server.channels();
 
         while !shutdown.load(Ordering::Relaxed) && !uei_exited!(&self.skel, uei) {
             match req_ch.recv_timeout(Duration::from_secs(1)) {
-                Ok(()) => res_ch.send(self.get_metrics())?,
+                Ok(()) => {
+                    res_ch.send(self.get_metrics())?;
+                }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(e) => Err(e)?,
+            }
+            if self.debug_level >= 1 {
+                self.process_debug_events();
             }
         }
 

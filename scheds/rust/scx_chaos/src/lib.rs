@@ -309,11 +309,24 @@ impl Builder<'_> {
         let open_opts = LibbpfOpts::default().into_bpf_open_opts();
         let mut open_skel = scx_ops_open!(skel_builder, open_object, chaos, open_opts)?;
         let hw_profile = scx_p2dq::HardwareProfile::detect();
+
+        // Create compatibility struct for macro requirements
+        struct CompatCliOpts {
+            log_level: String,
+        }
+        let cli_opts_compat = CompatCliOpts {
+            log_level: match self.verbose {
+                0 => "info".to_string(),
+                1 => "debug".to_string(),
+                _ => "trace".to_string(),
+            },
+        };
+
         scx_p2dq::init_open_skel!(
             &mut open_skel,
             &topo,
             self.p2dq_opts,
-            self.verbose,
+            &cli_opts_compat,
             &hw_profile
         )?;
 

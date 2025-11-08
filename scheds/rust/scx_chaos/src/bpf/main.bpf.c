@@ -12,6 +12,9 @@
 
 #include <stdbool.h>
 
+#define dbg(fmt, args...)	do { if (debug) bpf_printk(fmt, ##args); } while (0)
+#define trace(fmt, args...)	do { if (debug > 1) bpf_printk(fmt, ##args); } while (0)
+
 #define __COMPAT_chaos_scx_bpf_dsq_move_set_slice(it__iter, slice)        \
 	(bpf_ksym_exists(scx_bpf_dsq_move_set_slice) ?                    \
 		 scx_bpf_dsq_move_set_slice((it__iter), (slice)) :        \

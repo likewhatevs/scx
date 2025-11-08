@@ -48,8 +48,6 @@ char _license[] SEC("license") = "GPL";
 
 UEI_DEFINE(uei);
 
-#define dbg(fmt, args...)	do { if (debug) bpf_printk(fmt, ##args); } while (0)
-#define trace(fmt, args...)	do { if (debug > 1) bpf_printk(fmt, ##args); } while (0)
 
 const volatile struct {
 	u32 nr_cpus;
@@ -143,16 +141,58 @@ const volatile struct {
 	.kthreads_local = true,
 };
 
-const volatile u32 debug = 2;
+const volatile u32 debug;
+const volatile bool trace_enabled;
+const volatile bool debug_enabled;
 const u32 zero_u32 = 0;
 extern const volatile u32 nr_cpu_ids;
 
 const u64 lb_timer_intvl_ns = 250LLU * NSEC_PER_MSEC;
 
 static u32 llc_lb_offset = 1;
+
+/*
+ * Debug events circular buffer
+ */
+u32 debug_event_pos;
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, DEBUG_EVENTS_BUF_SIZE);
+	__type(key, u32);
+	__type(value, struct debug_event);
+} debug_events SEC(".maps");
 static u64 min_llc_runs_pick2 = 1;
 static bool saturated = false;
 static bool overloaded = false;
+
+/*
+ * Single debug event recording function with variable args
+ * Rust side formats messages based on event_type enum
+ */
+static inline void record_debug_event(u32 event_type, u64 arg0, u64 arg1, u64 arg2, u64 arg3)
+{
+	struct debug_event *event;
+	u32 pos, idx;
+
+	pos = __sync_fetch_and_add(&debug_event_pos, 1);
+	idx = pos % DEBUG_EVENTS_BUF_SIZE;
+
+	event = bpf_map_lookup_elem(&debug_events, &idx);
+	if (unlikely(!event))
+		return;
+
+	event->timestamp = scx_bpf_now();
+	event->event_type = event_type;
+	event->args[0] = arg0;
+	event->args[1] = arg1;
+	event->args[2] = arg2;
+	event->args[3] = arg3;
+	event->args[4] = 0;
+	event->args[5] = 0;
+}
+
+
 
 u64 llc_ids[MAX_LLCS];
 u32 cpu_core_ids[MAX_CPUS];
@@ -323,8 +363,9 @@ static int llc_create_atqs(struct llc_ctx *llcx)
 				      llcx->id);
 			return -ENOMEM;
 		}
-		trace("ATQ mig_atq %llu created for LLC %llu",
-		      (u64)llcx->mig_atq, llcx->id);
+		if (unlikely(debug_enabled))
+			record_debug_event(DEBUG_EVENT_ATQ_CREATED_FOR_LLC,
+					    (u64)llcx->mig_atq, llcx->id, 0, 0);
 	}
 
 	return 0;
@@ -864,7 +905,9 @@ static s32 pick_idle_cpu(struct task_struct *p, task_ctx *taskc,
 		    scx_bpf_test_and_clear_cpu_idle(pref_cpu)) {
 			*is_idle = true;
 			cpu = pref_cpu;
-			trace("PREF idle %s->%d", p->comm, pref_cpu);
+			if (unlikely(trace_enabled))
+				record_debug_event(TRACE_EVENT_PREFERRED_CPU_IDLE_FOR_TASK,
+						    pref_cpu, 0, 0, 0);
 			goto found_cpu;
 		}
 	}
@@ -947,8 +990,9 @@ static s32 p2dq_select_cpu_impl(struct task_struct *p, s32 prev_cpu, u64 wake_fl
 		stat_inc(P2DQ_STAT_IDLE);
 		scx_bpf_dsq_insert(p, SCX_DSQ_LOCAL, taskc->slice_ns, 0);
 	}
-	trace("SELECT [%d][%s] %i->%i idle %i",
-	      p->pid, p->comm, prev_cpu, cpu, is_idle);
+	if (unlikely(trace_enabled))
+		record_debug_event(TRACE_EVENT_SELECT_CPU_PID_COMM_PREV_TO_NEW_IDLE,
+				    p->pid, prev_cpu, cpu, is_idle);
 
 	return cpu;
 }
@@ -1057,9 +1101,9 @@ static void async_p2dq_enqueue(struct enqueue_promise *ret,
 		ret->vtime.enq_flags = enq_flags;
 		ret->vtime.vtime = p->scx.dsq_vtime;
 
-		trace("ENQUEUE %s weight %d slice %llu vtime %llu llc vtime %llu",
-		      p->comm, p->scx.weight, taskc->slice_ns,
-		      p->scx.dsq_vtime, llcx->vtime);
+		if (unlikely(trace_enabled))
+			record_debug_event(TRACE_EVENT_ENQUEUE_TASK_WEIGHT_SLICE_VTIME_LLC_VTIME,
+					    p->pid, p->scx.weight, taskc->slice_ns, p->scx.dsq_vtime);
 
 		return;
 	}
@@ -1130,9 +1174,9 @@ static void async_p2dq_enqueue(struct enqueue_promise *ret,
 			stat_inc(P2DQ_STAT_ENQ_LLC);
 		}
 
-		trace("ENQUEUE %s weight %d slice %llu vtime %llu llc vtime %llu",
-		      p->comm, p->scx.weight, taskc->slice_ns,
-		      p->scx.dsq_vtime, llcx->vtime);
+		if (unlikely(trace_enabled))
+			record_debug_event(TRACE_EVENT_ENQUEUE_TASK_WEIGHT_SLICE_VTIME_LLC_VTIME,
+					    p->pid, p->scx.weight, taskc->slice_ns, p->scx.dsq_vtime);
 
 		return;
 	}
@@ -1187,9 +1231,9 @@ static void async_p2dq_enqueue(struct enqueue_promise *ret,
 		stat_inc(P2DQ_STAT_ENQ_LLC);
 	}
 
-	trace("ENQUEUE %s weight %d slice %llu vtime %llu llc vtime %llu",
-	      p->comm, p->scx.weight, taskc->slice_ns,
-	      p->scx.dsq_vtime, llcx->vtime);
+	if (unlikely(trace_enabled))
+		record_debug_event(TRACE_EVENT_ENQUEUE_TASK_WEIGHT_SLICE_VTIME_LLC_VTIME,
+				    p->pid, p->scx.weight, taskc->slice_ns, p->scx.dsq_vtime);
 
 	ret->kind = P2DQ_ENQUEUE_PROMISE_VTIME;
 	ret->vtime.dsq_id = taskc->dsq_id;
@@ -1285,9 +1329,9 @@ static int p2dq_running_impl(struct task_struct *p)
 	if (taskc->llc_id != cpuc->llc_id) {
 		task_refresh_llc_runs(taskc);
 		stat_inc(P2DQ_STAT_LLC_MIGRATION);
-		trace("RUNNING %d cpu %d->%d llc %d->%d",
-		      p->pid, cpuc->id, task_cpu,
-		      taskc->llc_id, llcx->id);
+		if (unlikely(trace_enabled))
+			record_debug_event(TRACE_EVENT_RUNNING_PID_CPU_MIGRATION_LLC_MIGRATION,
+					    p->pid, cpuc->id, task_cpu, taskc->llc_id);
 	} else {
 		if (taskc->llc_runs == 0)
 			task_refresh_llc_runs(taskc);
@@ -1391,8 +1435,9 @@ void BPF_STRUCT_OPS(p2dq_stopping, struct task_struct *p, bool runnable)
 		// Note that affinitized load is absolute load, not scaled.
 		__sync_fetch_and_add(&llcx->affn_load, used);
 
-	trace("STOPPING %s weight %d slice %llu used %llu scaled %llu",
-	      p->comm, p->scx.weight, last_dsq_slice_ns, used, scaled_used);
+	if (unlikely(trace_enabled))
+		record_debug_event(TRACE_EVENT_STOPPING_TASK_WEIGHT_SLICE_USED_SCALED,
+				    p->pid, p->scx.weight, last_dsq_slice_ns, used);
 
 	if (!runnable) {
 		used = now - taskc->last_run_started;
@@ -1403,8 +1448,9 @@ void BPF_STRUCT_OPS(p2dq_stopping, struct task_struct *p, bool runnable)
 			    p->scx.weight >= 100) {
 				taskc->dsq_index += 1;
 				stat_inc(P2DQ_STAT_DSQ_CHANGE);
-				trace("%s[%p]: DSQ inc %llu -> %u", p->comm, p,
-				      taskc->last_dsq_index, taskc->dsq_index);
+				if (unlikely(trace_enabled))
+					record_debug_event(TRACE_EVENT_DSQ_INDEX_INCREMENT_FOR_TASK,
+							    p->pid, taskc->last_dsq_index, taskc->dsq_index, 0);
 			} else {
 				stat_inc(P2DQ_STAT_DSQ_SAME);
 			}
@@ -1413,9 +1459,9 @@ void BPF_STRUCT_OPS(p2dq_stopping, struct task_struct *p, bool runnable)
 			if (taskc->dsq_index > 0) {
 				taskc->dsq_index -= 1;
 				stat_inc(P2DQ_STAT_DSQ_CHANGE);
-				trace("%s[%p]: DSQ dec %llu -> %u",
-				      p->comm, p,
-				      taskc->last_dsq_index, taskc->dsq_index);
+				if (unlikely(trace_enabled))
+					record_debug_event(TRACE_EVENT_DSQ_INDEX_DECREMENT_FOR_TASK,
+							    p->pid, taskc->last_dsq_index, taskc->dsq_index, 0);
 			} else {
 				stat_inc(P2DQ_STAT_DSQ_SAME);
 			}
@@ -1459,7 +1505,9 @@ static bool consume_llc(struct llc_ctx *llcx)
 		pid = scx_atq_pop(llcx->mig_atq);
 		p = bpf_task_from_pid((s32)pid);
 		if (!p) {
-			trace("ATQ failed to get pid %llu", pid);
+			if (unlikely(debug_enabled))
+				record_debug_event(DEBUG_EVENT_ATQ_FAILED_TO_GET_PID,
+						    pid, 0, 0, 0);
 			return false;
 		}
 
@@ -1468,8 +1516,9 @@ static bool consume_llc(struct llc_ctx *llcx)
 			return false;
 		}
 
-		trace("ATQ %llu insert %s->%d",
-		      llcx->mig_atq, p->comm, p->pid);
+		if (unlikely(trace_enabled))
+			record_debug_event(TRACE_EVENT_ATQ_INSERT_TASK_TO_QUEUE,
+					    (u64)llcx->mig_atq, p->pid, 0, 0);
 		scx_bpf_dsq_insert(p,
 				   SCX_DSQ_LOCAL,
 				   taskc->slice_ns,
@@ -1557,8 +1606,9 @@ static __always_inline int dispatch_pick_two(s32 cpu, struct llc_ctx *cur_llcx, 
 		second = cur_llcx;
 	}
 
-	trace("PICK2 cpu[%d] first[%d] %llu second[%d] %llu",
-	      cpu, first->id, first->load, second->id, second->load);
+	if (unlikely(trace_enabled))
+		record_debug_event(TRACE_EVENT_PICK2_CPU_FIRST_SECOND_LOAD,
+				    cpu, first->id, first->load, second->id);
 
 	cur_load = cur_llcx->load + ((cur_llcx->load * lb_config.slack_factor) / 100);
 
@@ -1660,13 +1710,13 @@ static void p2dq_dispatch_impl(s32 cpu, struct task_struct *prev)
 		}
 	}
 
-	if (dsq_id != 0)
-		trace("DISPATCH cpu[%d] min_vtime %llu dsq_id %llu atq %llu",
-		      cpu, min_vtime, dsq_id, min_atq);
+	// Record dispatch info if we found something
+	if (unlikely(trace_enabled) && dsq_id != 0)
+		record_debug_event(TRACE_EVENT_DISPATCH_CPU_MIN_VTIME_DSQ_ATQ,
+				    cpu, min_vtime, dsq_id, (u64)min_atq);
 
 	// First try the DSQ with the lowest vtime for fairness.
 	if (unlikely(min_atq)) {
-		trace("ATQ dispatching %llu with min vtime %llu", min_atq, min_vtime);
 		pid = scx_atq_pop(min_atq);
 		if (likely((p = bpf_task_from_pid((s32)pid)))) {
 			/*
@@ -2064,7 +2114,9 @@ static int init_node(u32 node_id)
 		return ret;
 	}
 
-	dbg("CFG NODE[%u] configured", node_id);
+	if (unlikely(debug_enabled))
+		record_debug_event(DEBUG_EVENT_CONFIG_NODE_CONFIGURED,
+				    node_id, 0, 0, 0);
 
 	return 0;
 }
@@ -2102,7 +2154,9 @@ static s32 init_cpu(int cpu)
 	cpuc->mig_atq = llcx->mig_atq;
 
 	if (cpu_ctx_test_flag(cpuc, CPU_CTX_F_IS_BIG)) {
-		trace("CPU[%d] is big", cpu);
+		if (unlikely(debug_enabled))
+			record_debug_event(DEBUG_EVENT_CPU_IS_BIG_CORE,
+					    cpu, 0, 0, 0);
 		bpf_rcu_read_lock();
 		if (big_cpumask)
 			bpf_cpumask_set_cpu(cpu, big_cpumask);
@@ -2127,8 +2181,9 @@ static s32 init_cpu(int cpu)
 		bpf_cpumask_set_cpu(cpu, llcx->cpumask);
 	bpf_rcu_read_unlock();
 
-	trace("CFG CPU[%d]NODE[%d]LLC[%d] initialized",
-	    cpu, cpuc->node_id, cpuc->llc_id);
+	if (unlikely(debug_enabled))
+		record_debug_event(DEBUG_EVENT_CONFIG_CPU_NODE_LLC_INITIALIZED,
+				    cpu, cpuc->node_id, cpuc->llc_id, 0);
 
 	return 0;
 }
@@ -2178,12 +2233,14 @@ static bool load_balance_timer(void)
 		else
 			llcx->lb_llc_id = MAX_LLCS;
 
-		dbg("LB llcx[%u] %llu lb_llcx[%u] %llu imbalance %lli",
-		    llc_id, llcx->load, lb_llc_id, lb_llcx->load, load_imbalance);
+		if (unlikely(debug_enabled))
+			record_debug_event(DEBUG_EVENT_LOAD_BALANCE_LLC_CONTEXT,
+					    llc_id, llcx->load, lb_llc_id, lb_llcx->load);
 	}
 
-	dbg("LB Total load %llu, Total interactive %llu",
-	    load_sum, interactive_sum);
+	if (unlikely(debug_enabled))
+		record_debug_event(DEBUG_EVENT_LOAD_BALANCE_TOTAL_LOAD_INTERACTIVE,
+				    load_sum, interactive_sum, 0, 0);
 
 	llc_lb_offset = (llc_lb_offset % (topo_config.nr_llcs - 1)) + 1;
 
@@ -2197,7 +2254,9 @@ static bool load_balance_timer(void)
 		}
 	} else {
 		ideal_sum = (load_sum * p2dq_config.interactive_ratio) / 100;
-		dbg("LB autoslice ideal/sum %llu/%llu", ideal_sum, interactive_sum);
+		if (unlikely(debug_enabled))
+			record_debug_event(DEBUG_EVENT_LOAD_BALANCE_AUTOSLICE_IDEAL_SUM,
+					    ideal_sum, interactive_sum, 0, 0);
 		if (interactive_sum < ideal_sum) {
 			dsq_time_slices[0] = (11 * dsq_time_slices[0]) / 10;
 
@@ -2230,7 +2289,9 @@ reset_load:
 				if (j > 0 && dsq_time_slices[j] < dsq_time_slices[j-1]) {
 					dsq_time_slices[j] = dsq_time_slices[j-1] << p2dq_config.dsq_shift;
 				}
-				dbg("LB autoslice interactive slice %llu", dsq_time_slices[j]);
+				if (unlikely(debug_enabled))
+					record_debug_event(DEBUG_EVENT_LOAD_BALANCE_AUTOSLICE_INTERACTIVE_SLICE,
+							    j, dsq_time_slices[j], 0, 0);
 			}
 		}
 	}
@@ -2259,7 +2320,9 @@ static int timer_cb(void *map, int key, struct timer_wrapper *timerw)
 	bool resched = run_timer_cb(timerw->key);
 
 	if (!resched || !cb_timer || cb_timer->interval_ns == 0) {
-		trace("TIMER timer %d stopped", timerw->key);
+		if (unlikely(debug_enabled))
+			record_debug_event(DEBUG_EVENT_TIMER_STOPPED_FOR_KEY,
+					    timerw->key, 0, 0, 0);
 		return 0;
 	}
 
@@ -2383,7 +2446,9 @@ static s32 p2dq_init_impl()
 		}
 
 		dsq_id = cpu_dsq_id(i);
-		dbg("CFG creating affn CPU[%d]DSQ[%llu]", i, dsq_id);
+		if (unlikely(debug_enabled))
+			record_debug_event(DEBUG_EVENT_CONFIG_CREATING_AFFINITY_CPU_DSQ,
+					    i, dsq_id, 0, 0);
 		ret = scx_bpf_create_dsq(dsq_id, llcx->node_id);
 		if (ret < 0) {
 			scx_bpf_error("failed to create DSQ %llu", dsq_id);
