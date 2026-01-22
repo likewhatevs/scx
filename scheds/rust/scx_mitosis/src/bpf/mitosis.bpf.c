@@ -415,9 +415,11 @@ static inline int update_task_cpumask(struct task_struct *p,
 
 	bpf_cpumask_and(tctx->cpumask, cell_cpumask, p->cpus_ptr);
 
-	if (cell_cpumask)
-		tctx->all_cell_cpus_allowed =
-			bpf_cpumask_subset(cell_cpumask, p->cpus_ptr);
+	if (cell_cpumask && tctx->cpumask) {
+		u32 weight = bpf_cpumask_weight(cast_mask(tctx->cpumask));
+
+		tctx->all_cell_cpus_allowed = weight > 1;
+	}
 
 	/*
 	 * XXX - To be correct, we'd need to calculate the vtime
@@ -746,6 +748,8 @@ void BPF_STRUCT_OPS(mitosis_dispatch, s32 cpu, struct task_struct *prev)
 
 	struct task_struct *p;
 	bpf_for_each(scx_dsq, p, cell, 0) {
+		if (!bpf_cpumask_test_cpu(cpu, p->cpus_ptr))
+			continue;
 		min_vtime     = p->scx.dsq_vtime;
 		min_vtime_dsq = cell;
 		found	      = true;
@@ -754,6 +758,8 @@ void BPF_STRUCT_OPS(mitosis_dispatch, s32 cpu, struct task_struct *prev)
 
 	u64 dsq = cpu_dsq(cpu);
 	bpf_for_each(scx_dsq, p, dsq, 0) {
+		if (!bpf_cpumask_test_cpu(cpu, p->cpus_ptr))
+			continue;
 		if (!found || time_before(p->scx.dsq_vtime, min_vtime)) {
 			min_vtime     = p->scx.dsq_vtime;
 			min_vtime_dsq = dsq;
