@@ -32,7 +32,7 @@ jobs:
           kernel-url: ${{ matrix.kernel-url }}
           kernel-tag: ${{ matrix.kernel-tag }}
           kconfig: kernel.config
-          version: v9
+          version: v10
           run: echo ok
 
   integration-test:
@@ -93,7 +93,7 @@ jobs:
           kernel-url: ${{ matrix.kernel.url }}
           kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v9
+          version: v10
           cpus: 10
           memory: 10G
           run: |
@@ -109,7 +109,7 @@ jobs:
           kernel-url: ${{ matrix.kernel.url }}
           kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v9
+          version: v10
           cpus: 10
           memory: 10G
           network: user
