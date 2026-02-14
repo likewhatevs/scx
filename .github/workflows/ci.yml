@@ -84,8 +84,12 @@ jobs:
       matrix:
         scheduler: [scx_beerland, scx_bpfland, scx_chaos, scx_cosmos, scx_flash, scx_lavd, scx_layered, scx_p2dq, scx_rlfifo, scx_rustland, scx_rusty, scx_tickless]
         include:
+          - scheduler: scx_chaos
+            flags: --random-delay-frequency 0.5 --random-delay-min-us 1000 --random-delay-max-us 2000
+          - scheduler: scx_lavd
+            flags: --log-level debug
           - scheduler: scx_layered
-            flags: --run-example
+            flags: --log-level debug --stats 1 --run-example
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
