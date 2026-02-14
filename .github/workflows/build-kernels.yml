@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: sched_ext_for-next
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
@@ -17,7 +17,7 @@ jobs:
           kconfig: kernel.config
           run: echo ok
 
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: bpf_bpf-next
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
@@ -25,7 +25,7 @@ jobs:
           kconfig: kernel.config
           run: echo ok
 
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: stable_6_12
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
@@ -33,7 +33,7 @@ jobs:
           kconfig: kernel.config
           run: echo ok
 
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: stable_linux-rolling-stable
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git

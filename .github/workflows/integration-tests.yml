@@ -53,7 +53,7 @@ jobs:
         run: cargo build -p ${{ matrix.scheduler.name }}
 
       - name: Test scheduler
-        uses: ./.github/actions/vng
+        uses: likewhatevs/vng-action@main
         with:
           name: kernel-${{ env.KERNEL_NAME }}
           kernel-url: ${{ env.KERNEL_URL }}
@@ -66,7 +66,7 @@ jobs:
               target/debug/${{ matrix.scheduler.name }} ${{ matrix.scheduler.flags || '-v' }}
 
       - name: Stress test
-        uses: ./.github/actions/vng
+        uses: likewhatevs/vng-action@main
         with:
           name: kernel-${{ env.KERNEL_NAME }}
           kernel-url: ${{ env.KERNEL_URL }}

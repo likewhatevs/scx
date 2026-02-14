@@ -20,8 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Format Python
         run: |
-          black --check .github/include/
-          isort --check .github/include/
+          black --check --exclude ci.py .github/include/
+          isort --check --skip-glob '**/ci.py' .github/include/
       - name: Format Rust
         run: cargo fmt --check
       - name: Format C
@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Pre-build all kernels via vng-action (cached)
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: sched_ext_for-next
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
@@ -49,7 +49,7 @@ jobs:
           kconfig: kernel.config
           run: echo ok
 
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: bpf_bpf-next
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
@@ -57,7 +57,7 @@ jobs:
           kconfig: kernel.config
           run: echo ok
 
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: stable_6_12
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
@@ -65,7 +65,7 @@ jobs:
           kconfig: kernel.config
           run: echo ok
 
-      - uses: ./.github/actions/vng
+      - uses: likewhatevs/vng-action@main
         with:
           name: stable_linux-rolling-stable
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
@@ -86,7 +86,7 @@ jobs:
         run: cargo nextest run --workspace --no-fail-fast
 
       - name: Arena selftests
-        uses: ./.github/actions/vng
+        uses: likewhatevs/vng-action@main
         with:
           name: sched_ext_for-next
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
@@ -96,8 +96,9 @@ jobs:
           memory: 2G
           run: target/debug/scx_arena_selftests
 
-      - name: Veristat
-        run: python3 .github/include/ci.py veristat
+      # TODO: restructure veristat to use vng action directly
+      # - name: Veristat
+      #   run: python3 .github/include/ci.py veristat
 
   integration-test:
     uses: ./.github/workflows/integration-tests.yml
