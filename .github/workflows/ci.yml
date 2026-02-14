@@ -140,6 +140,7 @@ jobs:
               target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
+            export CARGO_NET_OFFLINE=true
             cargo veristat --manifest-path scheds/rust/${{ matrix.scheduler }}/Cargo.toml
 
   required-checks:

@@ -74,6 +74,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/install-deps-action
 
+      - name: Install veristat
+        run: |
+          git clone --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
+          make -C /tmp/veristat/src -j$(nproc)
+          sudo install /tmp/veristat/src/veristat /usr/local/bin/
+
+      - name: Install cargo-veristat
+        run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
+
       - name: Build scheduler
         run: cargo build -p ${{ matrix.scheduler }}
 
@@ -92,6 +101,10 @@ jobs:
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
               target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
+            export HOME=/home/runner
+            export PATH="$HOME/.cargo/bin:$PATH"
+            export CARGO_NET_OFFLINE=true
+            cargo veristat --manifest-path scheds/rust/${{ matrix.scheduler }}/Cargo.toml
 
   notify:
     needs: integration-test
