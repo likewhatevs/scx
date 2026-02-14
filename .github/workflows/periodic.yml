@@ -1,0 +1,230 @@
+name: periodic
+
+on:
+  schedule:
+    - cron: "35 0,6,12,18 * * *"
+  workflow_dispatch:
+
+env:
+  BPF_CLANG: clang-19
+  LIBCLANG_PATH: /usr/lib/llvm-19/lib
+  CC: gcc
+  LD: ld
+
+jobs:
+  build-kernels:
+    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        include:
+          - name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+          - name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+          - name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Kernel: ${{ matrix.name }}'
+        uses: likewhatevs/vng-action@main
+        with:
+          name: ${{ matrix.name }}
+          kernel-url: ${{ matrix.kernel-url }}
+          kernel-tag: ${{ matrix.kernel-tag }}
+          kconfig: kernel.config
+          run: echo ok
+
+  integration-test:
+    needs: build-kernels
+    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          # bpf_bpf-next — all 12 schedulers
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_beerland
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_bpfland
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_chaos
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_cosmos
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_flash
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_lavd
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_layered
+            flags: --run-example
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_p2dq
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_rlfifo
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_rustland
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_rusty
+          - kernel-name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+            name: scx_tickless
+
+          # stable_6_12 — 10 schedulers (scx_lavd, scx_p2dq blocklisted)
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_beerland
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_bpfland
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_chaos
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_cosmos
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_flash
+          # scx_lavd SKIPPED — https://github.com/sched-ext/scx/issues/3046
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_layered
+            flags: --run-example
+          # scx_p2dq SKIPPED — https://github.com/sched-ext/scx/issues/3047
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_rlfifo
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_rustland
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_rusty
+          - kernel-name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+            name: scx_tickless
+
+          # stable_linux-rolling-stable — all 12 schedulers
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_beerland
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_bpfland
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_chaos
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_cosmos
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_flash
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_lavd
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_layered
+            flags: --run-example
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_p2dq
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_rlfifo
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_rustland
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_rusty
+          - kernel-name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+            name: scx_tickless
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build scheduler
+        run: cargo build -p ${{ matrix.name }}
+
+      - name: 'Test: ${{ matrix.name }} (${{ matrix.kernel-name }})'
+        uses: likewhatevs/vng-action@main
+        with:
+          name: ${{ matrix.kernel-name }}
+          kernel-url: ${{ matrix.kernel-url }}
+          kernel-tag: ${{ matrix.kernel-tag }}
+          kconfig: kernel.config
+          cpus: 10
+          memory: 10G
+          run: |
+            stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
+              --affinity 1 --affinity-delay 1 --affinity-pin &
+            timeout --foreground --preserve-status 45 \
+              target/debug/${{ matrix.name }} ${{ matrix.flags || '-v' }}
+
+  notify:
+    needs: integration-test
+    runs-on: ubuntu-latest
+    if: ${{ failure() && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_USERNAME: ci
+          SLACK_ICON: https://www.dictionary.com/e/wp-content/uploads/2018/03/thisisfine-1.jpg
+          SLACK_TITLE: Workflow failed
+          SLACK_MESSAGE: Periodic CI job failed.
+          SLACK_COLOR: failure
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}

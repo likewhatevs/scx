@@ -1,4 +1,4 @@
-name: build-and-test
+name: ci
 
 on:
   pull_request:
@@ -36,36 +36,7 @@ jobs:
             cargo clippy --no-deps -p "$pkg" -- -Dwarnings
           done
 
-  build-kernels:
-    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
-    strategy:
-      matrix:
-        include:
-          - name: sched_ext_for-next
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
-            kernel-tag: for-next
-          - name: bpf_bpf-next
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
-            kernel-tag: master
-          - name: stable_6_12
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-            kernel-tag: linux-6.12.y
-          - name: stable_linux-rolling-stable
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-            kernel-tag: linux-rolling-stable
-    steps:
-      - uses: actions/checkout@v4
-      - name: 'Kernel: ${{ matrix.name }}'
-        uses: likewhatevs/vng-action@main
-        with:
-          name: ${{ matrix.name }}
-          kernel-url: ${{ matrix.kernel-url }}
-          kernel-tag: ${{ matrix.kernel-tag }}
-          kconfig: kernel.config
-          run: echo ok
-
   build-and-test:
-    needs: build-kernels
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +44,15 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+
+      - name: Cache for-next kernel
+        uses: likewhatevs/vng-action@main
+        with:
+          name: sched_ext_for-next
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+          kernel-tag: for-next
+          kconfig: kernel.config
+          run: echo ok
 
       - name: Build
         run: cargo build --all-targets --locked
@@ -97,17 +77,51 @@ jobs:
           memory: 2G
           run: target/debug/scx_arena_selftests
 
-      # TODO: restructure veristat to use vng action directly
-      # - name: Veristat
-      #   run: python3 .github/include/ci.py veristat
-
   integration-test:
-    uses: ./.github/workflows/integration-tests.yml
     needs: build-and-test
-    secrets: inherit
+    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - name: scx_beerland
+          - name: scx_bpfland
+          - name: scx_chaos
+          - name: scx_cosmos
+          - name: scx_flash
+          - name: scx_lavd
+          - name: scx_layered
+            flags: --run-example
+          - name: scx_p2dq
+          - name: scx_rlfifo
+          - name: scx_rustland
+          - name: scx_rusty
+          - name: scx_tickless
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build scheduler
+        run: cargo build -p ${{ matrix.name }}
+
+      - name: 'Test: ${{ matrix.name }}'
+        uses: likewhatevs/vng-action@main
+        with:
+          name: sched_ext_for-next
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+          kernel-tag: for-next
+          kconfig: kernel.config
+          cpus: 10
+          memory: 10G
+          run: |
+            stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
+              --affinity 1 --affinity-delay 1 --affinity-pin &
+            timeout --foreground --preserve-status 45 \
+              target/debug/${{ matrix.name }} ${{ matrix.flags || '-v' }}
 
   required-checks:
-    needs: [lint, build-kernels, build-and-test, integration-test]
+    needs: [lint, build-and-test, integration-test]
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
     if: always()
     env:
@@ -120,9 +134,9 @@ jobs:
     runs-on: ubuntu-24.04
     if: github.ref == 'refs/heads/main'
     permissions:
-      contents: write  # To push a branch
-      pages: write  # To push to a GitHub Pages site
-      id-token: write # To update the deployment status
+      contents: write
+      pages: write
+      id-token: write
     steps:
       # prevent cache permission errors
       - run: sudo chown root /usr/bin/tar && sudo chmod u+s /usr/bin/tar
