@@ -45,7 +45,7 @@ jobs:
           kconfig: kernel.config
           run: echo ok
 
-  build-and-test:
+  build:
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
@@ -68,7 +68,7 @@ jobs:
         run: cargo nextest run --workspace --no-fail-fast
 
   arena-selftests:
-    needs: [cache-kernel, build-and-test]
+    needs: [cache-kernel, build]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -89,9 +89,9 @@ jobs:
           memory: 2G
           run: target/debug/scx_arena_selftests
 
-  integration-test:
-    # gates on build-and-test to ensure compile + unit tests pass before running integration
-    needs: [cache-kernel, build-and-test]
+  test:
+    # gates on build to ensure compile + unit tests pass before running integration
+    needs: [cache-kernel, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -128,8 +128,30 @@ jobs:
             timeout --foreground --preserve-status 45 \
               target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
 
+  veristat:
+    needs: [cache-kernel, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
+
+      - name: Install cargo-veristat
+        run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
+
+      - name: Veristat
+        uses: likewhatevs/vng-action@main
+        with:
+          name: sched_ext_for-next
+          kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
+          kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
+          kconfig: kernel.config
+          cpus: 10
+          memory: 10G
+          run: cargo veristat
+
   required-checks:
-    needs: [lint, build-and-test, arena-selftests, integration-test]
+    needs: [lint, build, arena-selftests, test, veristat]
     runs-on: ubuntu-latest
     if: always()
     env:
