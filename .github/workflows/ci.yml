@@ -32,22 +32,40 @@ jobs:
             cargo clippy --no-deps -p "$pkg" -- -Dwarnings
           done
 
-  cache-kernel:
-    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
+  cache-kernels:
+    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    strategy:
+      matrix:
+        include:
+          - name: sched_ext_for-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+            kernel-tag: for-next
+          - name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+          - name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+          - name: stable_6_13
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.13.y
+          - name: stable_6_16
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.16.y
     steps:
       - uses: actions/checkout@v4
-      - name: Cache for-next kernel
+      - name: 'Cache kernel: ${{ matrix.name }}'
         uses: likewhatevs/vng-action@main
         with:
-          name: sched_ext_for-next
-          kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
-          kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
+          name: ${{ matrix.name }}
+          kernel-url: ${{ matrix.kernel-url }}
+          kernel-tag: ${{ matrix.kernel-tag }}
           kconfig: kernel.config
           version: v3
           run: echo ok
 
   build:
-    needs: cache-kernel
+    needs: cache-kernels
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +88,7 @@ jobs:
         run: cargo nextest run --workspace --no-fail-fast
 
   arena-selftests:
-    needs: cache-kernel
+    needs: cache-kernels
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +111,7 @@ jobs:
           run: target/debug/scx_arena_selftests
 
   test:
-    needs: cache-kernel
+    needs: cache-kernels
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -150,14 +168,71 @@ jobs:
           version: v3
           cpus: 10
           memory: 10G
+          network: user
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            export CARGO_NET_OFFLINE=true
+            cargo veristat --manifest-path scheds/rust/${{ matrix.scheduler }}/Cargo.toml
+
+  veristat-extra:
+    needs: cache-kernels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        kernel:
+          - name: sched_ext_for-next
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+            tag: for-next
+          - name: bpf_bpf-next
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            tag: master
+          - name: stable_linux-rolling-stable
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            tag: linux-rolling-stable
+          - name: stable_6_13
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            tag: linux-6.13.y
+          - name: stable_6_16
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            tag: linux-6.16.y
+        scheduler: [scx_beerland, scx_bpfland, scx_chaos, scx_cosmos, scx_flash, scx_lavd, scx_layered, scx_p2dq, scx_rlfifo, scx_rustland, scx_rusty, scx_tickless]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
+
+      - name: Install veristat
+        run: |
+          git clone --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
+          make -C /tmp/veristat/src -j$(nproc)
+          sudo install /tmp/veristat/src/veristat /usr/local/bin/
+
+      - name: Install cargo-veristat
+        run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
+
+      - name: Build scheduler
+        run: cargo build -p ${{ matrix.scheduler }}
+
+      - name: 'Veristat: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
+        uses: likewhatevs/vng-action@main
+        with:
+          name: ${{ matrix.kernel.name }}
+          kernel-url: ${{ matrix.kernel.url }}
+          kernel-tag: ${{ matrix.kernel.tag }}
+          kconfig: kernel.config
+          version: v3
+          cpus: 10
+          memory: 10G
+          network: user
+          run: |
+            export HOME=/home/runner
+            export PATH="$HOME/.cargo/bin:$PATH"
             cargo veristat --manifest-path scheds/rust/${{ matrix.scheduler }}/Cargo.toml
 
   required-checks:
-    needs: [lint, build, arena-selftests, test]
+    needs: [lint, build, arena-selftests, test, veristat-extra]
     runs-on: ubuntu-latest
     if: always()
     env:

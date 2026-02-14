@@ -112,10 +112,10 @@ jobs:
           version: v3
           cpus: 10
           memory: 10G
+          network: user
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            export CARGO_NET_OFFLINE=true
             cargo veristat --manifest-path scheds/rust/${{ matrix.scheduler }}/Cargo.toml
 
   notify:
