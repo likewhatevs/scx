@@ -32,7 +32,7 @@ jobs:
             cargo clippy --no-deps -p "$pkg" -- -Dwarnings
           done
 
-  cache-kernels:
+  kernel:
     runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     strategy:
       matrix:
@@ -65,7 +65,7 @@ jobs:
           run: echo ok
 
   build:
-    needs: cache-kernels
+    needs: kernel
     runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
@@ -88,7 +88,7 @@ jobs:
         run: cargo nextest run --workspace --no-fail-fast
 
   arena-selftests:
-    needs: cache-kernels
+    needs: kernel
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +111,7 @@ jobs:
           run: target/ci/scx_arena_selftests
 
   test:
-    needs: cache-kernels
+    needs: kernel
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -174,8 +174,8 @@ jobs:
             export PATH="$HOME/.cargo/bin:$PATH"
             cargo veristat ${{ matrix.scheduler }}
 
-  veristat-extra:
-    needs: cache-kernels
+  veristat:
+    needs: kernel
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -229,7 +229,7 @@ jobs:
             cargo veristat ${{ matrix.scheduler }}
 
   required-checks:
-    needs: [lint, build, arena-selftests, test, veristat-extra]
+    needs: [lint, build, arena-selftests, test, veristat]
     runs-on: ubuntu-latest
     if: always()
     env:
