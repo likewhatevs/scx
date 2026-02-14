@@ -122,6 +122,7 @@ runs:
       shell: bash
       run: |
         echo "::group::Cloning kernel ${{ inputs.kernel-tag }} from ${{ inputs.kernel-url }}"
+        rm -rf "/tmp/vng-kernel-${{ inputs.name }}"
         git clone --depth 1 --branch "${{ inputs.kernel-tag }}" "${{ inputs.kernel-url }}" "/tmp/vng-kernel-${{ inputs.name }}"
         echo "::endgroup::"
 

@@ -20,8 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Format Python
         run: |
-          black --check .github/include/**/*.py
-          isort --check .github/include/**/*.py
+          black --check .github/include/
+          isort --check .github/include/
       - name: Format Rust
         run: cargo fmt --check
       - name: Format C
