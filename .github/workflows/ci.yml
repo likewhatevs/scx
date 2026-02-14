@@ -37,19 +37,19 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: sched_ext_for-next
+          - name: scx__sched_ext__for-next
             kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
             kernel-tag: for-next
-          - name: bpf_bpf-next
+          - name: scx__bpf__bpf-next
             kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
             kernel-tag: master
-          - name: stable_linux-rolling-stable
+          - name: scx__stable__linux-rolling-stable
             kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             kernel-tag: linux-rolling-stable
-          - name: stable_6_13
+          - name: scx__stable__6_13
             kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             kernel-tag: linux-6.13.y
-          - name: stable_6_16
+          - name: scx__stable__6_16
             kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             kernel-tag: linux-6.16.y
     steps:
@@ -101,7 +101,7 @@ jobs:
       - name: Arena selftests
         uses: likewhatevs/vng-action@main
         with:
-          name: sched_ext_for-next
+          name: scx__sched_ext__for-next
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
@@ -116,13 +116,13 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
-        scheduler: [scx_beerland, scx_bpfland, scx_chaos, scx_cosmos, scx_flash, scx_lavd, scx_layered, scx_p2dq, scx_rlfifo, scx_rustland, scx_rusty, scx_tickless]
+        scheduler: [beerland, bpfland, chaos, cosmos, flash, lavd, layered, p2dq, rlfifo, rustland, rusty, tickless]
         include:
-          - scheduler: scx_chaos
+          - scheduler: chaos
             flags: --random-delay-frequency 0.5 --random-delay-min-us 1000 --random-delay-max-us 2000
-          - scheduler: scx_lavd
+          - scheduler: lavd
             flags: --log-level debug
-          - scheduler: scx_layered
+          - scheduler: layered
             flags: --log-level debug --stats 1 --run-example
       fail-fast: false
     steps:
@@ -130,22 +130,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/install-deps-action
 
-      - name: Install veristat
+      - name: Install cargo veristat
         run: |
           git clone --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
           make -C /tmp/veristat/src -j$(nproc)
           sudo install /tmp/veristat/src/veristat /usr/local/bin/
-
-      - name: Install cargo-veristat
-        run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
+          cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
 
       - name: Build scheduler
-        run: cargo build --profile ci -p ${{ matrix.scheduler }}
+        run: cargo build --profile ci -p scx_${{ matrix.scheduler }}
 
       - name: 'Test: ${{ matrix.scheduler }}'
         uses: likewhatevs/vng-action@main
         with:
-          name: sched_ext_for-next
+          name: scx__sched_ext__for-next
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
@@ -156,12 +154,12 @@ jobs:
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
-              target/ci/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
+              target/ci/scx_${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
 
-      - name: 'Veristat: ${{ matrix.scheduler }}'
+      - name: 'Verify: ${{ matrix.scheduler }}'
         uses: likewhatevs/vng-action@main
         with:
-          name: sched_ext_for-next
+          name: scx__sched_ext__for-next
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
@@ -172,7 +170,7 @@ jobs:
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat --profile ci ${{ matrix.scheduler }}
+            cargo veristat --profile ci scx_${{ matrix.scheduler }}
 
   veristat:
     needs: kernel
@@ -180,44 +178,42 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
-        scheduler: [scx_cosmos, scx_lavd, scx_layered, scx_mitosis]
+        scheduler: [cosmos, lavd, layered, mitosis]
         kernel:
-          - name: sched_ext_for-next
+          - name: scx__sched_ext__for-next
             url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
             tag: for-next
-          - name: bpf_bpf-next
+          - name: scx__bpf__bpf-next
             url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
             tag: master
-          - name: stable_linux-rolling-stable
+          - name: scx__stable__linux-rolling-stable
             url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             tag: linux-rolling-stable
-          - name: stable_6_13
+          - name: scx__stable__6_13
             url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             tag: linux-6.13.y
-          - name: stable_6_16
+          - name: scx__stable__6_16
             url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             tag: linux-6.16.y
         exclude:
           # layered_init and layered_runnable hit 1M insn limit on 6.13 verifier
-          - scheduler: scx_layered
+          - scheduler: layered
             kernel:
-              name: stable_6_13
+              name: scx__stable__6_13
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/install-deps-action
 
-      - name: Install veristat
+      - name: Install cargo veristat
         run: |
           git clone --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
           make -C /tmp/veristat/src -j$(nproc)
           sudo install /tmp/veristat/src/veristat /usr/local/bin/
+          cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
 
-      - name: Install cargo-veristat
-        run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
-
-      - name: 'Veristat: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
+      - name: 'Verify: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
         uses: likewhatevs/vng-action@main
         with:
           name: ${{ matrix.kernel.name }}
@@ -231,7 +227,7 @@ jobs:
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat --profile ci ${{ matrix.scheduler }}
+            cargo veristat --profile ci scx_${{ matrix.scheduler }}
 
   required-checks:
     needs: [lint, build, arena-selftests, test, veristat]
