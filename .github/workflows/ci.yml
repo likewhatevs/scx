@@ -55,8 +55,8 @@ jobs:
         with:
           tool: cargo-nextest
 
-      - name: Build
-        run: cargo build --all-targets --locked
+      - name: Check
+        run: cargo check --all-targets --locked
 
       - name: Check vmlinux sync
         run: |
