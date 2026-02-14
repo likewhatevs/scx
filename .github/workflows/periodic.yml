@@ -84,7 +84,7 @@ jobs:
         run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
 
       - name: Build scheduler
-        run: cargo build -p ${{ matrix.scheduler }}
+        run: cargo build --profile ci -p ${{ matrix.scheduler }}
 
       - name: 'Test: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
         uses: likewhatevs/vng-action@main
@@ -100,7 +100,7 @@ jobs:
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
-              target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
+              target/ci/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
 
       - name: 'Veristat: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
         uses: likewhatevs/vng-action@main
