@@ -83,19 +83,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
-        scheduler:
-          - scx_beerland
-          - scx_bpfland
-          - scx_chaos
-          - scx_cosmos
-          - scx_flash
-          - scx_lavd
-          - scx_layered
-          - scx_p2dq
-          - scx_rlfifo
-          - scx_rustland
-          - scx_rusty
-          - scx_tickless
+        scheduler: [scx_beerland, scx_bpfland, scx_chaos, scx_cosmos, scx_flash, scx_lavd, scx_layered, scx_p2dq, scx_rlfifo, scx_rustland, scx_rusty, scx_tickless]
         include:
           - scheduler: scx_layered
             flags: --run-example
