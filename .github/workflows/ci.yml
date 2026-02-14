@@ -61,7 +61,7 @@ jobs:
           kernel-url: ${{ matrix.kernel-url }}
           kernel-tag: ${{ matrix.kernel-tag }}
           kconfig: kernel.config
-          version: v12
+          version: v13
           run: echo ok
 
   build:
@@ -105,7 +105,7 @@ jobs:
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v12
+          version: v13
           cpus: 16
           memory: 2G
           run: target/ci/scx_arena_selftests
@@ -149,7 +149,7 @@ jobs:
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v12
+          version: v13
           cpus: 10
           memory: 10G
           run: |
@@ -165,14 +165,14 @@ jobs:
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v12
+          version: v13
           cpus: 10
           memory: 10G
           network: user
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat --manifest-path scheds/rust/${{ matrix.scheduler }}/Cargo.toml
+            cargo veristat ${{ matrix.scheduler }}
 
   veristat-extra:
     needs: cache-kernels
@@ -219,14 +219,14 @@ jobs:
           kernel-url: ${{ matrix.kernel.url }}
           kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v12
+          version: v13
           cpus: 10
           memory: 10G
           network: user
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat --manifest-path scheds/rust/${{ matrix.scheduler }}/Cargo.toml
+            cargo veristat ${{ matrix.scheduler }}
 
   required-checks:
     needs: [lint, build, arena-selftests, test, veristat-extra]
