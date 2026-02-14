@@ -70,6 +70,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
 
       - name: Build
         run: cargo build --all-targets --locked
