@@ -36,47 +36,40 @@ jobs:
             cargo clippy --no-deps -p "$pkg" -- -Dwarnings
           done
 
+  build-kernels:
+    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
+    strategy:
+      matrix:
+        include:
+          - name: sched_ext_for-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+            kernel-tag: for-next
+          - name: bpf_bpf-next
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            kernel-tag: master
+          - name: stable_6_12
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-6.12.y
+          - name: stable_linux-rolling-stable
+            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            kernel-tag: linux-rolling-stable
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Kernel: ${{ matrix.name }}'
+        uses: likewhatevs/vng-action@main
+        with:
+          name: ${{ matrix.name }}
+          kernel-url: ${{ matrix.kernel-url }}
+          kernel-tag: ${{ matrix.kernel-tag }}
+          kconfig: kernel.config
+          run: echo ok
+
   build-and-test:
+    needs: build-kernels
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: 'Kernel: sched_ext for-next'
-        uses: likewhatevs/vng-action@main
-        with:
-          name: sched_ext_for-next
-          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
-          kernel-tag: for-next
-          kconfig: kernel.config
-          run: echo ok
-
-      - name: 'Kernel: bpf-next'
-        uses: likewhatevs/vng-action@main
-        with:
-          name: bpf_bpf-next
-          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
-          kernel-tag: master
-          kconfig: kernel.config
-          run: echo ok
-
-      - name: 'Kernel: stable 6.12'
-        uses: likewhatevs/vng-action@main
-        with:
-          name: stable_6_12
-          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-          kernel-tag: linux-6.12.y
-          kconfig: kernel.config
-          run: echo ok
-
-      - name: 'Kernel: stable rolling'
-        uses: likewhatevs/vng-action@main
-        with:
-          name: stable_linux-rolling-stable
-          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-          kernel-tag: linux-rolling-stable
-          kconfig: kernel.config
-          run: echo ok
 
       - name: Build
         run: cargo build --all-targets --locked
@@ -111,7 +104,7 @@ jobs:
     secrets: inherit
 
   required-checks:
-    needs: [lint, build-and-test, integration-test]
+    needs: [lint, build-kernels, build-and-test, integration-test]
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
     if: always()
     env:
