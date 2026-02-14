@@ -54,39 +54,39 @@ jobs:
             url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             tag: linux-rolling-stable
         scheduler:
-          - name: scx_beerland
-          - name: scx_bpfland
-          - name: scx_chaos
-          - name: scx_cosmos
-          - name: scx_flash
-          - name: scx_lavd
-          - name: scx_layered
+          - scx_beerland
+          - scx_bpfland
+          - scx_chaos
+          - scx_cosmos
+          - scx_flash
+          - scx_lavd
+          - scx_layered
+          - scx_p2dq
+          - scx_rlfifo
+          - scx_rustland
+          - scx_rusty
+          - scx_tickless
+        include:
+          - scheduler: scx_layered
             flags: --run-example
-          - name: scx_p2dq
-          - name: scx_rlfifo
-          - name: scx_rustland
-          - name: scx_rusty
-          - name: scx_tickless
         exclude:
           # https://github.com/sched-ext/scx/issues/3046
           - kernel:
               name: stable_6_12
-            scheduler:
-              name: scx_lavd
+            scheduler: scx_lavd
           # https://github.com/sched-ext/scx/issues/3047
           - kernel:
               name: stable_6_12
-            scheduler:
-              name: scx_p2dq
+            scheduler: scx_p2dq
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build scheduler
-        run: cargo build -p ${{ matrix.scheduler.name }}
+        run: cargo build -p ${{ matrix.scheduler }}
 
-      - name: 'Test: ${{ matrix.scheduler.name }} (${{ matrix.kernel.name }})'
+      - name: 'Test: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
         uses: likewhatevs/vng-action@main
         with:
           name: ${{ matrix.kernel.name }}
@@ -99,7 +99,7 @@ jobs:
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
-              target/debug/${{ matrix.scheduler.name }} ${{ matrix.scheduler.flags || '-v' }}
+              target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
 
   notify:
     needs: integration-test
