@@ -71,6 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
 
       - name: Build scheduler
         run: cargo build -p ${{ matrix.scheduler }}

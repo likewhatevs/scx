@@ -18,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
       - name: Format Rust
         run: cargo fmt --check
       - name: Format C
@@ -49,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -71,6 +73,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
 
       - name: Build
         run: cargo build -p scx_arena_selftests --locked
@@ -105,6 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
 
       - name: Build scheduler
         run: cargo build -p ${{ matrix.scheduler }}
@@ -150,7 +154,8 @@ jobs:
       - uses: ./.github/actions/install-deps-action
       - name: Build Book and Linux Docs
         run: |
-          cd / && rustup component add rustfmt && cd $OLDPWD
+          rustup install nightly
+          rustup component add rustfmt --toolchain nightly
           RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo +nightly doc --workspace --no-deps --bins --lib --examples --document-private-items
           sudo apt install build-essential graphviz sphinx-doc python3-sphinx-rtd-theme texlive-latex-recommended python3-yaml -y
           cargo install htmlq
