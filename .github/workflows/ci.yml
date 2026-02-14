@@ -9,9 +9,8 @@ on:
 
 env:
   BPF_CLANG: clang-19
-  LIBCLANG_PATH: /usr/lib/llvm-19/lib
-  CC: gcc
-  LD: ld
+  SCHED_EXT_KERNEL_URL: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+  SCHED_EXT_KERNEL_TAG: for-next
 
 jobs:
   lint:
@@ -49,8 +48,8 @@ jobs:
         uses: likewhatevs/vng-action@main
         with:
           name: sched_ext_for-next
-          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
-          kernel-tag: for-next
+          kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
+          kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
           run: echo ok
 
@@ -70,8 +69,8 @@ jobs:
         uses: likewhatevs/vng-action@main
         with:
           name: sched_ext_for-next
-          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
-          kernel-tag: for-next
+          kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
+          kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
           cpus: 16
           memory: 2G
@@ -99,8 +98,8 @@ jobs:
         uses: likewhatevs/vng-action@main
         with:
           name: sched_ext_for-next
-          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
-          kernel-tag: for-next
+          kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
+          kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
           cpus: 10
           memory: 10G
@@ -140,7 +139,7 @@ jobs:
           RUSTDOCFLAGS="--enable-index-page -Zunstable-options" cargo +nightly doc --workspace --no-deps --bins --lib --examples --document-private-items
           sudo apt install build-essential graphviz sphinx-doc python3-sphinx-rtd-theme texlive-latex-recommended python3-yaml -y
           cargo install htmlq
-          git clone --single-branch -b for-next --depth 1 https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git linux
+          git clone --single-branch -b "$SCHED_EXT_KERNEL_TAG" --depth 1 "$SCHED_EXT_KERNEL_URL" linux
           cd linux
           make DOCS_THEME=sphinx_rtd_theme SPHINXDIRS=scheduler htmldocs
           make DOCS_THEME=sphinx_rtd_theme SPHINXDIRS=bpf htmldocs

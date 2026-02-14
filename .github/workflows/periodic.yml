@@ -7,9 +7,6 @@ on:
 
 env:
   BPF_CLANG: clang-19
-  LIBCLANG_PATH: /usr/lib/llvm-19/lib
-  CC: gcc
-  LD: ld
 
 jobs:
   build-kernels:
