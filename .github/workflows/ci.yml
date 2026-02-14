@@ -153,7 +153,8 @@ jobs:
           cpus: 10
           memory: 10G
           run: |
-            export PATH="/home/runner/.cargo/bin:$PATH"
+            export HOME=/home/runner
+            export PATH="$HOME/.cargo/bin:$PATH"
             cargo veristat
 
   required-checks:
