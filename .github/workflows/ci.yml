@@ -61,7 +61,7 @@ jobs:
           kernel-url: ${{ matrix.kernel-url }}
           kernel-tag: ${{ matrix.kernel-tag }}
           kconfig: kernel.config
-          version: v6
+          version: v7
           run: echo ok
 
   build:
@@ -105,7 +105,7 @@ jobs:
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v6
+          version: v7
           cpus: 16
           memory: 2G
           run: target/debug/scx_arena_selftests
@@ -149,7 +149,7 @@ jobs:
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v6
+          version: v7
           cpus: 10
           memory: 10G
           run: |
@@ -165,7 +165,7 @@ jobs:
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v6
+          version: v7
           cpus: 10
           memory: 10G
           network: user
@@ -222,7 +222,7 @@ jobs:
           kernel-url: ${{ matrix.kernel.url }}
           kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v6
+          version: v7
           cpus: 10
           memory: 10G
           network: user
