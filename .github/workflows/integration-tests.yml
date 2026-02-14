@@ -6,6 +6,12 @@ on:
       repo-name:
         type: string
 
+env:
+  BPF_CLANG: clang-19
+  LIBCLANG_PATH: /usr/lib/llvm-19/lib
+  CC: gcc
+  LD: ld
+
 jobs:
   list-tests:
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
