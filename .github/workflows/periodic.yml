@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ failure() && github.ref == 'refs/heads/main' }}
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Slack Notification
         uses: rtCamp/action-slack-notify@v2
         env:
