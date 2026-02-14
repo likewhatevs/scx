@@ -56,7 +56,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Check
-        run: cargo check --all-targets --locked -j$(( $(nproc) / 2 ))
+        run: cargo check --locked
 
       - name: Check vmlinux sync
         run: |
