@@ -106,8 +106,8 @@ jobs:
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
           version: v14
-          cpus: 16
-          memory: 2G
+          cpus: 10
+          memory: 13G
           run: target/ci/scx_arena_selftests
 
   test:
@@ -151,7 +151,7 @@ jobs:
           kconfig: kernel.config
           version: v14
           cpus: 10
-          memory: 10G
+          memory: 13G
           run: |
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
               --affinity 1 --affinity-delay 1 --affinity-pin &
@@ -167,7 +167,7 @@ jobs:
           kconfig: kernel.config
           version: v14
           cpus: 10
-          memory: 10G
+          memory: 13G
           network: user
           run: |
             export HOME=/home/runner
@@ -226,7 +226,7 @@ jobs:
           kconfig: kernel.config
           version: v14
           cpus: 10
-          memory: 10G
+          memory: 13G
           network: user
           run: |
             export HOME=/home/runner

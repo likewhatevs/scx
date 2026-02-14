@@ -95,7 +95,7 @@ jobs:
           kconfig: kernel.config
           version: v14
           cpus: 10
-          memory: 10G
+          memory: 13G
           run: |
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
               --affinity 1 --affinity-delay 1 --affinity-pin &
@@ -111,7 +111,7 @@ jobs:
           kconfig: kernel.config
           version: v14
           cpus: 10
-          memory: 10G
+          memory: 13G
           network: user
           run: |
             export HOME=/home/runner

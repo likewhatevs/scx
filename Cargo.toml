@@ -51,3 +51,5 @@ incremental = true
 inherits = "dev"
 debug = 0
 incremental = false
+strip = true
+lto = false
