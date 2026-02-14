@@ -14,7 +14,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -45,7 +45,7 @@ jobs:
           run: echo ok
 
   build-and-test:
-    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -67,7 +67,7 @@ jobs:
 
   arena-selftests:
     needs: [cache-kernel, build-and-test]
-    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -89,7 +89,7 @@ jobs:
   integration-test:
     # gates on build-and-test to ensure compile + unit tests pass before running integration
     needs: [cache-kernel, build-and-test]
-    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       matrix:
@@ -126,7 +126,7 @@ jobs:
 
   required-checks:
     needs: [lint, build-and-test, arena-selftests, integration-test]
-    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     if: always()
     env:
       NEEDS_CONTEXT: ${{ toJSON(needs) }}
