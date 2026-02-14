@@ -32,7 +32,7 @@ jobs:
           kernel-url: ${{ matrix.kernel-url }}
           kernel-tag: ${{ matrix.kernel-tag }}
           kconfig: kernel.config
-          version: v10
+          version: v11
           run: echo ok
 
   integration-test:
@@ -41,6 +41,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
+        scheduler: [scx_beerland, scx_bpfland, scx_chaos, scx_cosmos, scx_flash, scx_lavd, scx_layered, scx_p2dq, scx_rlfifo, scx_rustland, scx_rusty, scx_tickless]
         kernel:
           - name: bpf_bpf-next
             url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
@@ -51,7 +52,6 @@ jobs:
           - name: stable_linux-rolling-stable
             url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             tag: linux-rolling-stable
-        scheduler: [scx_beerland, scx_bpfland, scx_chaos, scx_cosmos, scx_flash, scx_lavd, scx_layered, scx_p2dq, scx_rlfifo, scx_rustland, scx_rusty, scx_tickless]
         include:
           - scheduler: scx_chaos
             flags: --random-delay-frequency 0.5 --random-delay-min-us 1000 --random-delay-max-us 2000
@@ -93,7 +93,7 @@ jobs:
           kernel-url: ${{ matrix.kernel.url }}
           kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v10
+          version: v11
           cpus: 10
           memory: 10G
           run: |
@@ -109,7 +109,7 @@ jobs:
           kernel-url: ${{ matrix.kernel.url }}
           kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v10
+          version: v11
           cpus: 10
           memory: 10G
           network: user
