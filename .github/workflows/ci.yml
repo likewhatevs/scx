@@ -139,6 +139,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/install-deps-action
 
+      - name: Install veristat
+        run: |
+          git clone --depth 1 https://github.com/libbpf/veristat /tmp/veristat
+          make -C /tmp/veristat -j$(nproc)
+          sudo install /tmp/veristat/veristat /usr/local/bin/
+
       - name: Install cargo-veristat
         run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
 
