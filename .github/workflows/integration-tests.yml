@@ -22,7 +22,7 @@ jobs:
         run: python3 .github/include/list-integration-tests.py "${{ inputs.repo-name }}" >> $GITHUB_OUTPUT
 
   integration-test:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     timeout-minutes: 30
     needs: list-tests
     strategy:
@@ -32,11 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/install-deps-action
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.scheduler.name }}
-          prefix-key: "4"
 
       - name: Resolve kernel
         run: |
@@ -57,7 +52,7 @@ jobs:
       - name: 'Test: ${{ matrix.scheduler.name }}'
         uses: likewhatevs/vng-action@main
         with:
-          name: kernel-${{ env.KERNEL_NAME }}
+          name: ${{ env.KERNEL_NAME }}
           kernel-url: ${{ env.KERNEL_URL }}
           kernel-tag: ${{ env.KERNEL_TAG }}
           kconfig: kernel.config
@@ -70,7 +65,7 @@ jobs:
       - name: 'Stress: ${{ matrix.scheduler.name }}'
         uses: likewhatevs/vng-action@main
         with:
-          name: kernel-${{ env.KERNEL_NAME }}
+          name: ${{ env.KERNEL_NAME }}
           kernel-url: ${{ env.KERNEL_URL }}
           kernel-tag: ${{ env.KERNEL_TAG }}
           kconfig: kernel.config

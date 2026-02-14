@@ -165,7 +165,7 @@ def main():
             matrix.add(
                 (
                     "scx_layered",
-                    " ".join(flags),
+                    "--run-example " + " ".join(flags),
                     "" if kernel == this_default else kernel,
                 )
             )
