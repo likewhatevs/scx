@@ -47,6 +47,7 @@ jobs:
           run: echo ok
 
   build:
+    needs: cache-kernel
     runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +139,18 @@ jobs:
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
               target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
+
+      - name: 'Veristat: ${{ matrix.scheduler }}'
+        uses: likewhatevs/vng-action@main
+        with:
+          name: sched_ext_for-next
+          kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
+          kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
+          kconfig: kernel.config
+          version: v3
+          cpus: 10
+          memory: 10G
+          run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
             export CARGO_NET_OFFLINE=true

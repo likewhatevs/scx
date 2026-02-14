@@ -101,6 +101,18 @@ jobs:
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
               target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
+
+      - name: 'Veristat: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
+        uses: likewhatevs/vng-action@main
+        with:
+          name: ${{ matrix.kernel.name }}
+          kernel-url: ${{ matrix.kernel.url }}
+          kernel-tag: ${{ matrix.kernel.tag }}
+          kconfig: kernel.config
+          version: v3
+          cpus: 10
+          memory: 10G
+          run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
             export CARGO_NET_OFFLINE=true
