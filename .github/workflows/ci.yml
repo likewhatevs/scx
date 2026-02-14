@@ -83,7 +83,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       matrix:
-        include:
+        scheduler:
           - name: scx_beerland
           - name: scx_bpfland
           - name: scx_chaos
@@ -103,9 +103,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build scheduler
-        run: cargo build -p ${{ matrix.name }}
+        run: cargo build -p ${{ matrix.scheduler.name }}
 
-      - name: 'Test: ${{ matrix.name }}'
+      - name: 'Test: ${{ matrix.scheduler.name }}'
         uses: likewhatevs/vng-action@main
         with:
           name: sched_ext_for-next
@@ -118,7 +118,7 @@ jobs:
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
-              target/debug/${{ matrix.name }} ${{ matrix.flags || '-v' }}
+              target/debug/${{ matrix.scheduler.name }} ${{ matrix.scheduler.flags || '-v' }}
 
   required-checks:
     needs: [lint, build-and-test, integration-test]
