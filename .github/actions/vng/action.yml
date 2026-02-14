@@ -92,8 +92,8 @@ runs:
           echo "::error::Could not resolve ref '${{ inputs.kernel-tag }}' from ${{ inputs.kernel-url }}"
           exit 1
         fi
-        DEREF=$(echo "$REMOTE_OUTPUT" | grep '\^{}' | awk '{print $1}')
-        DIRECT=$(echo "$REMOTE_OUTPUT" | grep -v '\^{}' | awk '{print $1}')
+        DEREF=$(echo "$REMOTE_OUTPUT" | { grep '\^{}' || true; } | awk '{print $1}')
+        DIRECT=$(echo "$REMOTE_OUTPUT" | { grep -v '\^{}' || true; } | awk '{print $1}')
         FULL_SHA="${DEREF:-$DIRECT}"
         SHA="${FULL_SHA:0:12}"
 
