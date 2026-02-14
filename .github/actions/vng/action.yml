@@ -1,0 +1,163 @@
+name: 'Build and run kernel via virtme-ng'
+description: 'Like likewhatevs/vng-action but without install-deps (assumes deps are pre-installed)'
+
+inputs:
+  name:
+    description: 'Name for the kernel build cache'
+    required: true
+  kernel-url:
+    description: 'Git repository URL for the kernel source'
+    required: true
+  kernel-tag:
+    description: 'Git tag or branch to checkout'
+    required: true
+  version:
+    description: 'Cache version string, bump to invalidate the cache'
+    required: false
+    default: 'v1'
+  kconfig:
+    description: 'Path to a kconfig fragment file (relative to the repo root)'
+    required: false
+    default: ''
+  cpus:
+    description: 'Number of CPUs for the VM'
+    required: false
+    default: ''
+  memory:
+    description: 'Memory for the VM, e.g. 4G, 512M'
+    required: false
+    default: ''
+  run:
+    description: 'Commands to execute inside the VM'
+    required: true
+
+outputs:
+  kernel-sha:
+    description: 'Short commit SHA (12 chars) of the resolved kernel commit'
+    value: ${{ steps.kernel-sha.outputs.sha }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        errors=0
+        if [ -z "${{ inputs.name }}" ]; then
+          echo "::error::Input 'name' is required but was not provided."
+          errors=$((errors + 1))
+        fi
+        if [ -z "${{ inputs.kernel-url }}" ]; then
+          echo "::error::Input 'kernel-url' is required but was not provided."
+          errors=$((errors + 1))
+        fi
+        if [ -z "${{ inputs.kernel-tag }}" ]; then
+          echo "::error::Input 'kernel-tag' is required but was not provided."
+          errors=$((errors + 1))
+        fi
+        if [ -z "${{ inputs.run }}" ]; then
+          echo "::error::Input 'run' is required but was not provided."
+          errors=$((errors + 1))
+        fi
+        if [ -n "${{ inputs.kconfig }}" ] && [ ! -f "$GITHUB_WORKSPACE/${{ inputs.kconfig }}" ]; then
+          echo "::error::kconfig file not found: '${{ inputs.kconfig }}' (resolved to '$GITHUB_WORKSPACE/${{ inputs.kconfig }}')"
+          errors=$((errors + 1))
+        fi
+        if [ "$errors" -gt 0 ]; then
+          exit 1
+        fi
+
+    - name: Restore kernel SHA from prior job
+      id: sha-cache-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: /tmp/vng-sha-${{ inputs.name }}
+        key: vng-sha-${{ inputs.name }}-${{ inputs.kernel-tag }}-${{ github.run_id }}
+
+    - name: Resolve kernel commit SHA
+      id: kernel-sha
+      shell: bash
+      run: |
+        SHA_FILE="/tmp/vng-sha-${{ inputs.name }}/sha"
+
+        if [ -f "$SHA_FILE" ]; then
+          SHA=$(cat "$SHA_FILE")
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "::notice::Using cached kernel SHA: $SHA"
+          exit 0
+        fi
+
+        REMOTE_OUTPUT=$(git ls-remote "${{ inputs.kernel-url }}" "${{ inputs.kernel-tag }}" "${{ inputs.kernel-tag }}^{}")
+        if [ -z "$REMOTE_OUTPUT" ]; then
+          echo "::error::Could not resolve ref '${{ inputs.kernel-tag }}' from ${{ inputs.kernel-url }}"
+          exit 1
+        fi
+        DEREF=$(echo "$REMOTE_OUTPUT" | grep '\^{}' | awk '{print $1}')
+        DIRECT=$(echo "$REMOTE_OUTPUT" | grep -v '\^{}' | awk '{print $1}')
+        FULL_SHA="${DEREF:-$DIRECT}"
+        SHA="${FULL_SHA:0:12}"
+
+        mkdir -p /tmp/vng-sha-${{ inputs.name }}
+        echo -n "$SHA" > "$SHA_FILE"
+
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        echo "::notice::Resolved ${{ inputs.kernel-tag }} -> $SHA"
+
+    - name: Save kernel SHA for subsequent jobs
+      if: steps.sha-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: /tmp/vng-sha-${{ inputs.name }}
+        key: vng-sha-${{ inputs.name }}-${{ inputs.kernel-tag }}-${{ github.run_id }}
+
+    - name: Cache kernel build
+      uses: actions/cache@v4
+      id: kernel-cache
+      with:
+        path: /tmp/vng-kernel-${{ inputs.name }}
+        key: vng-kernel-${{ inputs.name }}-${{ steps.kernel-sha.outputs.sha }}-${{ inputs.version }}
+
+    - name: Clone and build kernel
+      if: steps.kernel-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::group::Cloning kernel ${{ inputs.kernel-tag }} from ${{ inputs.kernel-url }}"
+        git clone --depth 1 --branch "${{ inputs.kernel-tag }}" "${{ inputs.kernel-url }}" "/tmp/vng-kernel-${{ inputs.name }}"
+        echo "::endgroup::"
+
+        cd "/tmp/vng-kernel-${{ inputs.name }}"
+
+        BUILD_ARGS=(--build --force)
+        if [ -n "${{ inputs.kconfig }}" ]; then
+          BUILD_ARGS+=(--config "$GITHUB_WORKSPACE/${{ inputs.kconfig }}")
+        fi
+
+        echo "::group::Building kernel with virtme-ng"
+        vng "${BUILD_ARGS[@]}"
+        echo "::endgroup::"
+
+    - name: Run workload in VM
+      shell: bash
+      run: |
+        SCRIPT="/tmp/vng-workload-${{ inputs.name }}.sh"
+        cat > "$SCRIPT" <<'WORKLOAD_EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        WORKLOAD_EOF
+        echo "$VNG_COMMANDS" >> "$SCRIPT"
+        chmod +x "$SCRIPT"
+
+        VNG_ARGS=(--cwd "$GITHUB_WORKSPACE")
+        if [ -n "$VNG_CPUS" ]; then
+          VNG_ARGS+=(--cpus "$VNG_CPUS")
+        fi
+        if [ -n "$VNG_MEMORY" ]; then
+          VNG_ARGS+=(--memory "$VNG_MEMORY")
+        fi
+
+        cd "/tmp/vng-kernel-${{ inputs.name }}"
+        vng "${VNG_ARGS[@]}" -- bash "$SCRIPT"
+      env:
+        VNG_COMMANDS: ${{ inputs.run }}
+        VNG_CPUS: ${{ inputs.cpus }}
+        VNG_MEMORY: ${{ inputs.memory }}
