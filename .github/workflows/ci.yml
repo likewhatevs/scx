@@ -152,7 +152,9 @@ jobs:
           version: v3
           cpus: 10
           memory: 10G
-          run: cargo veristat
+          run: |
+            export PATH="/home/runner/.cargo/bin:$PATH"
+            cargo veristat
 
   required-checks:
     needs: [lint, build, arena-selftests, test, veristat]
