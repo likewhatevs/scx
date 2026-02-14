@@ -52,7 +52,7 @@ jobs:
       - name: Build scheduler
         run: cargo build -p ${{ matrix.scheduler.name }}
 
-      - name: Test scheduler
+      - name: 'Test: ${{ matrix.scheduler.name }}'
         uses: likewhatevs/vng-action@main
         with:
           name: kernel-${{ env.KERNEL_NAME }}
@@ -65,7 +65,7 @@ jobs:
             timeout --foreground --preserve-status 30 \
               target/debug/${{ matrix.scheduler.name }} ${{ matrix.scheduler.flags || '-v' }}
 
-      - name: Stress test
+      - name: 'Stress: ${{ matrix.scheduler.name }}'
         uses: likewhatevs/vng-action@main
         with:
           name: kernel-${{ env.KERNEL_NAME }}
