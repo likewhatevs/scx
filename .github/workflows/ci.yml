@@ -76,7 +76,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Check
-        run: cargo check --locked
+        run: cargo check --profile ci --locked
 
       - name: Check vmlinux sync
         run: |
@@ -85,7 +85,7 @@ jobs:
           diff --no-dereference -qr scheds/vmlinux/ "$tmpdir/vmlinux/"
 
       - name: Unit tests
-        run: cargo nextest run --workspace --no-fail-fast
+        run: cargo nextest run --cargo-profile ci --workspace --no-fail-fast
 
   arena-selftests:
     needs: kernel
@@ -172,7 +172,7 @@ jobs:
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat ${{ matrix.scheduler }}
+            cargo veristat --profile ci ${{ matrix.scheduler }}
 
   veristat:
     needs: kernel
@@ -197,6 +197,11 @@ jobs:
           - name: stable_6_16
             url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
             tag: linux-6.16.y
+        exclude:
+          # layered_init and layered_runnable hit 1M insn limit on 6.13 verifier
+          - scheduler: scx_layered
+            kernel:
+              name: stable_6_13
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -226,7 +231,7 @@ jobs:
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat ${{ matrix.scheduler }}
+            cargo veristat --profile ci ${{ matrix.scheduler }}
 
   required-checks:
     needs: [lint, build, arena-selftests, test, veristat]

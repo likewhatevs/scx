@@ -116,7 +116,7 @@ jobs:
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat ${{ matrix.scheduler }}
+            cargo veristat --profile ci ${{ matrix.scheduler }}
 
   notify:
     needs: integration-test
