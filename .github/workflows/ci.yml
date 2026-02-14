@@ -46,7 +46,7 @@ jobs:
           run: echo ok
 
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'likewhatevs' && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
