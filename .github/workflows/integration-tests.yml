@@ -16,130 +16,69 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Nix
-        uses: ./.github/actions/install-nix
-        with:
-          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-
       - name: List tests
         id: output
-        run: nix run ./.nix#list-integration-tests -- "${{ inputs.repo-name }}" >> $GITHUB_OUTPUT
+        run: python3 .github/include/list-integration-tests.py "${{ inputs.repo-name }}" >> $GITHUB_OUTPUT
 
   integration-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: list-tests
     strategy:
-          matrix:
-            scheduler: ${{ fromJson(needs.list-tests.outputs.matrix) }}
-          fail-fast: false
+      matrix:
+        scheduler: ${{ fromJson(needs.list-tests.outputs.matrix) }}
+      fail-fast: false
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: ./.github/actions/install-nix
-        with:
-          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-
-      # prevent cache permission errors
-      - run: sudo chown root /usr/bin/tar && sudo chmod u+s /usr/bin/tar
+      - uses: ./.github/actions/install-deps-action
       - uses: Swatinem/rust-cache@v2
         with:
-          # ignore the flags here, this is a rust cache
           key: ${{ matrix.scheduler.name }}
           prefix-key: "4"
-      - uses: ./.github/actions/install-deps-action
 
-      - name: Load kernel
+      - name: Resolve kernel
         run: |
-          if [ -n "${{ matrix.scheduler.kernel }}" ]; then
-            KERNEL_NAME="${{ matrix.scheduler.kernel }}"
-          elif [ -n "${{ inputs.repo-name }}" ]; then
-            KERNEL_NAME="${{ inputs.repo-name }}"
-          else
-            KERNEL_NAME=$(cargo metadata --format-version 1 --no-deps \
-              | jq -r --arg pkg "${{ matrix.scheduler.name }}" '
-                  .packages[]?
-                  | select(.name == $pkg)
-                  | .metadata.scx?.ci?.kernel?.default
-                  // "sched_ext/for-next"
-              ')
+          KERNEL="${{ matrix.scheduler.kernel }}"
+          if [ -z "$KERNEL" ]; then
+            KERNEL="sched_ext/for-next"
           fi
-
+          KERNEL_NAME=$(echo "$KERNEL" | tr '/' '_')
+          KERNEL_URL=$(jq -r --arg k "$KERNEL" '.[$k].repo' kernel-versions.json)
+          KERNEL_TAG=$(jq -r --arg k "$KERNEL" '.[$k].branch' kernel-versions.json)
           echo "KERNEL_NAME=$KERNEL_NAME" >> $GITHUB_ENV
-          echo "KERNEL_STORE_PATH=$(nix build --no-link --print-out-paths ./.nix#kernel_${KERNEL_NAME})" >> $GITHUB_ENV
-          echo "KERNEL_HEADERS_STORE_PATH=$(nix build --no-link --print-out-paths ./.nix#kernel_${KERNEL_NAME}.headers)" >> $GITHUB_ENV
+          echo "KERNEL_URL=$KERNEL_URL" >> $GITHUB_ENV
+          echo "KERNEL_TAG=$KERNEL_TAG" >> $GITHUB_ENV
 
-      # cache virtiofsd (goes away w/ 24.04)
-      - name: Cache virtiofsd
-        id: cache-virtiofsd
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/lib/virtiofsd
-          key: virtiofsd-binary
-      - if: ${{ steps.cache-virtiofsd.outputs.cache-hit != 'true' }}
-        run: cargo install virtiofsd && sudo cp -a ~/.cargo/bin/virtiofsd /usr/lib/
-
-      # The actual build:
       - name: Build scheduler
-        run: |
-          if [ "${{ matrix.scheduler['name'] }}" == "scx_chaos" ]; then
-            SCHED_PATH=$(nix build --print-build-logs --print-out-paths ./.nix#scx_chaos)/bin/scx_chaos
-          else
-            cargo build -p ${{ matrix.scheduler['name'] }}
-            SCHED_PATH=target/debug/${{ matrix.scheduler['name'] }}
-          fi
-          echo "SCHED_PATH=$SCHED_PATH" >> $GITHUB_ENV
-          echo "Built scheduler at: $SCHED_PATH"
+        run: cargo build -p ${{ matrix.scheduler.name }}
 
-      # Print CPU model before running the tests (this can be useful for
-      # debugging purposes)
-      - run: grep 'model name' /proc/cpuinfo | head -1
-
-      # Debug: print environment variables
-      - name: Debug environment variables
-        if: always()
-        run: |
-          echo "KERNEL_STORE_PATH=${{ env.KERNEL_STORE_PATH }}"
-          echo "SCHED_PATH=${{ env.SCHED_PATH }}"
-          echo "KERNEL_HEADERS_STORE_PATH=${{ env.KERNEL_HEADERS_STORE_PATH }}"
-
-      # Test schedulers
-      - run: .github/include/scripts/test_sched ${{ env.KERNEL_STORE_PATH }}/bzImage ${{ env.SCHED_PATH }} VNG_RW=true
-      # this is where errors we want logs on start occurring, so always generate debug info and save logs
-        if: always() && env.SCHED_PATH != '' && env.KERNEL_STORE_PATH != ''
-      # Stress schedulers
-      - uses: cytopia/shell-command-retry-action@v0.1.2
-        name: stress test
-        if: always() && env.SCHED_PATH != '' && env.KERNEL_STORE_PATH != '' && env.KERNEL_HEADERS_STORE_PATH != ''
+      - name: Test scheduler
+        uses: likewhatevs/vng-action@main
         with:
-          retries: 3
-          command: .github/include/scripts/run_stress_tests -k ${{ env.KERNEL_STORE_PATH }}/bzImage --sched ${{ matrix.scheduler['name'] }} --sched-path ${{ env.SCHED_PATH }} --rw true --headers ${{ env.KERNEL_HEADERS_STORE_PATH }} --extra-scheduler-args "${{ matrix.scheduler['flags'] }}"
-      - run: sudo cat /var/log/dmesg > host-dmesg.ci.log
-        if: always()
-      - run: mkdir -p ./log_save/
-        if: always()
-      # no symlink following here (to avoid cycle`s)
-      - run: sudo find '/home/runner/' -iname '*.ci.log' -exec mv {} ./log_save/ \;
-        if: always()
-      - name: Set artifact name
-        if: always()
-        run: |
-          KERNEL_SUFFIX=""
-          if [ -n "${{ matrix.scheduler.kernel }}" ]; then
-            KERNEL_CLEAN=$(echo "${{ matrix.scheduler.kernel }}" | tr '/' '_')
-            KERNEL_SUFFIX="_${KERNEL_CLEAN}"
-          fi
-          echo "ARTIFACT_NAME=${{ matrix.scheduler['name'] }}${{ matrix.scheduler['flags'] }}${KERNEL_SUFFIX}_logs_${{ github.run_id }}_${{ github.run_attempt }}" >> $GITHUB_ENV
-      - name: upload debug logs, bpftrace, dmesg, etc.
-        if: always()
-        uses: actions/upload-artifact@v4
+          name: kernel-${{ env.KERNEL_NAME }}
+          kernel-url: ${{ env.KERNEL_URL }}
+          kernel-tag: ${{ env.KERNEL_TAG }}
+          kconfig: kernel.config
+          cpus: 8
+          memory: 10G
+          run: |
+            timeout --foreground --preserve-status 30 \
+              target/debug/${{ matrix.scheduler.name }} ${{ matrix.scheduler.flags || '-v' }}
+
+      - name: Stress test
+        uses: likewhatevs/vng-action@main
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: ./log_save/*.ci.log
-          # it's all txt files w/ 90 day retention, lets be nice.
-          compression-level: 9
+          name: kernel-${{ env.KERNEL_NAME }}
+          kernel-url: ${{ env.KERNEL_URL }}
+          kernel-tag: ${{ env.KERNEL_TAG }}
+          kconfig: kernel.config
+          cpus: 10
+          memory: 10G
+          run: |
+            stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
+              --affinity 1 --affinity-delay 1 --affinity-pin &
+            timeout --foreground --preserve-status 45 \
+              target/debug/${{ matrix.scheduler.name }} ${{ matrix.scheduler.flags || '-v' }}
 
   all-success:
     needs: integration-test
@@ -149,5 +88,4 @@ jobs:
       NEEDS_CONTEXT: ${{ toJSON(needs) }}
     steps:
       - uses: actions/checkout@v4
-      - run: nix run ./.nix#nix-develop-gha -- ./.nix#gha-build-kernels
       - run: echo "$NEEDS_CONTEXT" | jq -e 'to_entries | all(.value.result == "success")'

@@ -9,32 +9,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: ./.github/actions/install-nix
+      - uses: likewhatevs/vng-action@main
         with:
-          cachix-auth-token: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          name: sched_ext_for-next
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+          kernel-tag: for-next
+          kconfig: kernel.config
+          run: echo ok
 
-      - name: Load dependencies
-        run: nix run ./.nix#nix-develop-gha -- ./.nix#gha-build-kernels
+      - uses: likewhatevs/vng-action@main
+        with:
+          name: bpf_bpf-next
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+          kernel-tag: master
+          kconfig: kernel.config
+          run: echo ok
 
-      - name: Build all kernels
-        id: nix-build
-        run: |
-          drvnames=$(nix flake show ./.nix --json | jq -r '
-            .packages["x86_64-linux"] | keys[] | select(startswith("kernel_"))' |
-            awk '{ print "./.nix#" $0 "\n./.nix#" $0 ".headers" }')
+      - uses: likewhatevs/vng-action@main
+        with:
+          name: stable_6_12
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+          kernel-tag: linux-6.12.y
+          kconfig: kernel.config
+          run: echo ok
 
-          echo 'kernel-paths<<EOF' >> $GITHUB_OUTPUT
-          xargs nix build --no-link --print-out-paths <<< "$drvnames" >>$GITHUB_OUTPUT
-          echo 'EOF' >> "$GITHUB_OUTPUT"
-
-      - name: Explicitly push to cachix
-        run: |
-          # address an edge case where the dedicated runner has a local cache hit
-          # but that entry wasn't uploaded to cachix
-          if [ -f "$HOME/.config/cachix/cachix.dhall" ]; then
-            KERNEL_PATHS="${{ steps.nix-build.outputs.kernel-paths }}"
-            printf '%s\n' "$KERNEL_PATHS" | xargs cachix push sched-ext
-          else
-            echo "no auth token; skipping cache push"
-          fi
+      - uses: likewhatevs/vng-action@main
+        with:
+          name: stable_linux-rolling-stable
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+          kernel-tag: linux-rolling-stable
+          kconfig: kernel.config
+          run: echo ok

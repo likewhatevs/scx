@@ -3,10 +3,7 @@
 import argparse
 import asyncio
 import csv
-import fnmatch
-import glob
 import io
-import itertools
 import json
 import os
 import random
@@ -16,20 +13,7 @@ import string
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, Optional
-
-
-def rglob_no_symlinks(pattern):
-    for base, dirs, files in os.walk(".", followlinks=False):
-        for name in files:
-            path = os.path.join(base, name)
-            # skip symlinked files too (optional)
-            if not os.path.islink(path):
-                # Convert to relative path and normalize separators
-                rel_path = os.path.relpath(path, ".")
-                # Match against the full relative path using fnmatch
-                if fnmatch.fnmatch(rel_path, pattern):
-                    yield rel_path
+from typing import List, Optional
 
 
 async def run_command(
@@ -61,17 +45,9 @@ async def run_command(
 
 
 async def get_kernel_path(kernel_name: str) -> str:
-    """Get the kernel path from Nix store for the given kernel name."""
-    stdout = await run_command(
-        [
-            "nix",
-            "build",
-            "--no-link",
-            "--print-out-paths",
-            f"./.nix#kernel_{kernel_name}",
-        ]
-    )
-    return stdout.strip() + "/bzImage"
+    """Get the kernel path from vng-action build cache."""
+    safe_name = kernel_name.replace("/", "_")
+    return f"/tmp/vng-kernel-{safe_name}/arch/x86/boot/bzImage"
 
 
 async def run_command_in_vm(
@@ -196,144 +172,6 @@ async def get_scheduler_packages() -> List[dict]:
             )
 
     return schedulers
-
-
-async def get_clippy_packages() -> List[str]:
-    """Get list of packages that should be linted with clippy."""
-    stdout = await run_command(["cargo", "metadata", "--format-version", "1"])
-    metadata = json.loads(stdout)
-
-    clippy_packages = []
-    for pkg in metadata.get("packages", []):
-        pkg_metadata = pkg.get("metadata")
-        if pkg_metadata:
-            scx_metadata = pkg_metadata.get("scx")
-            if scx_metadata and scx_metadata.get("ci", {}).get("use_clippy") == True:
-                clippy_packages.append(pkg["name"])
-
-    return clippy_packages
-
-
-async def run_format():
-    """Format all targets."""
-    print("Running format...", flush=True)
-
-    py_files = list(rglob_no_symlinks(".github/include/**/*.py"))
-    if py_files:
-        await run_command(["black"] + py_files, no_capture=True)
-        await run_command(["isort"] + py_files, no_capture=True)
-
-    await run_command(["cargo", "fmt"], no_capture=True)
-
-    nix_files = list(rglob_no_symlinks("**/*.nix"))
-    if nix_files:
-        await run_command(
-            ["nix", "--extra-experimental-features", "nix-command flakes", "fmt"]
-            + [os.path.join("../", x) for x in nix_files],
-            cwd=".nix",
-            no_capture=True,
-        )
-
-    c_patterns = [
-        "tools/scxtop/**/*.h",
-        "tools/scxtop/**/*.c",
-        "scheds/rust/scx_chaos/**/*.c",
-        "scheds/rust/scx_chaos/**/*.h",
-        "scheds/rust/scx_mitosis/**/*.c",
-        "scheds/rust/scx_mitosis/**/*.h",
-    ]
-    c_files = []
-    for pattern in c_patterns:
-        c_files.extend(list(rglob_no_symlinks(pattern)))
-
-    if c_files:
-        await run_command(["clang-format", "-i"] + c_files, no_capture=True)
-
-    await run_command(["git", "diff", "--exit-code"], no_capture=True)
-    print("✓ Format completed successfully", flush=True)
-
-
-async def run_build():
-    """Build all targets."""
-    print("Running build...", flush=True)
-
-    # Run Cargo and Nix builds in parallel
-    print("Building Rust schedulers and scx_chaos with Nix in parallel...", flush=True)
-
-    # Start both builds concurrently
-    cargo_coro = run_command(["cargo", "build", "--all-targets", "--locked"], no_capture=True)
-    nix_coro = run_command(["nix", "build", "--print-build-logs", "--no-link", "./.nix#scx_chaos"])
-
-    # Wait for both to complete (nix output will only appear on failure)
-    await asyncio.gather(cargo_coro, nix_coro)
-
-    print("✓ All builds completed successfully", flush=True)
-
-
-async def run_clippy():
-    """Run clippy on packages marked for CI linting."""
-    print("Running clippy...", flush=True)
-
-    clippy_packages = await get_clippy_packages()
-    for package in clippy_packages:
-        await run_command(
-            ["cargo", "clippy", "--no-deps", "-p", package, "--", "-Dwarnings"],
-            no_capture=True,
-        )
-
-    print("✓ Clippy checks passed", flush=True)
-
-
-async def run_tests():
-    """Run the test suite."""
-    print("Checking that vmlinux.tar.zst is in sync...", flush=True)
-
-    with tempfile.TemporaryDirectory() as tempdir:
-        await run_command(
-            ["tar", "-xf", "rust/scx_utils/vmlinux.tar.zst", "-C", tempdir],
-            no_capture=True,
-        )
-        await run_command(
-            [
-                "diff",
-                "--no-dereference",
-                "-qr",
-                "scheds/vmlinux/",
-                f"{tempdir}/vmlinux/",
-            ],
-            no_capture=True,
-        )
-
-    print("Running tests...", flush=True)
-
-    # Run nextest directly on the host
-    await run_command(
-        [
-            "cargo",
-            "nextest",
-            "run",
-            "--workspace",
-            "--no-fail-fast",
-        ],
-        no_capture=True,
-    )
-
-    # Build the arena selftest
-    await run_command(["cargo", "build", "-p", "scx_arena_selftests"], no_capture=True)
-
-    # Get CPU count
-    cpu_count = min(os.cpu_count() or 16, 16)
-
-    # Run arena selftests in VM (requires BPF capabilities)
-    await run_command_in_vm(
-        "sched_ext/for-next",
-        ["target/debug/scx_arena_selftests"],
-        memory=2 * 1024 * 1024 * 1024,
-        cpus=cpu_count,
-        no_capture=True,
-    )
-
-    print("✓ Tests completed successfully", flush=True)
 
 
 async def run_veristat():
@@ -620,7 +458,7 @@ async def run_veristat():
                     if verdict != "success":
                         prog_name = cleaned_row.get("prog_name", "")
                         if prog_name:
-                            reproduction_cmd = f"nix run \".nix#ci\" veristat {result['kernel']} {result['scheduler']} {prog_name}"
+                            reproduction_cmd = f"python3 .github/include/ci.py veristat {result['kernel']} {result['scheduler']} {prog_name}"
                             reproduction_cmds.add(reproduction_cmd)
 
             for cmd in sorted(reproduction_cmds):
@@ -645,27 +483,10 @@ async def run_veristat():
 
 
 async def extract_bpf_objects(scheduler_name: str, output_dir: str) -> List[str]:
-    """Extract BPF objects from scheduler binary using existing script."""
-
-    if scheduler_name == "scx_chaos":
-        # Use Nix-built binary for scx_chaos
-        print(f"Building {scheduler_name} with Nix for BPF extraction...", flush=True)
-        stdout = await run_command(
-            [
-                "nix",
-                "build",
-                "--no-link",
-                "--print-out-paths",
-                f"./.nix#{scheduler_name}",
-            ]
-        )
-        nix_store_path = stdout.strip()
-        binary_path = f"{nix_store_path}/bin/{scheduler_name}"
-    else:
-        # Find the scheduler binary in target/debug for other schedulers
-        binary_path = f"target/debug/{scheduler_name}"
-        if not os.path.exists(binary_path):
-            raise Exception(f"Warning: Scheduler binary {binary_path} not found")
+    """Extract BPF objects from scheduler binary."""
+    binary_path = f"target/debug/{scheduler_name}"
+    if not os.path.exists(binary_path):
+        raise Exception(f"Warning: Scheduler binary {binary_path} not found")
 
     result = await run_command(
         ["./scripts/extract_bpf_objects.sh", binary_path, output_dir]
@@ -691,12 +512,7 @@ async def run_veristat_debug(kernel_name: str, scheduler_name: str, symbol_name:
         flush=True,
     )
 
-    # Build the specific scheduler first
-    if scheduler_name == "scx_chaos":
-        # For scx_chaos, building is handled in extract_bpf_objects using Nix
-        pass
-    else:
-        await run_command(["cargo", "build", "-p", scheduler_name], no_capture=True)
+    await run_command(["cargo", "build", "-p", scheduler_name], no_capture=True)
 
     # Create temporary directory for BPF object extraction
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -728,31 +544,14 @@ async def run_veristat_debug(kernel_name: str, scheduler_name: str, symbol_name:
         )
 
 
-
-
-async def run_all():
-    """Run all CI steps in the correct order."""
-    await run_format()
-    await run_build()
-    await run_clippy()
-    await run_veristat()
-    await run_tests()
-
-
 async def main():
     parser = argparse.ArgumentParser(description="SCX CI Script")
 
     subparsers = parser.add_subparsers(
-        dest="command", description="Command to run (default: all)"
+        dest="command", description="Command to run"
     )
     subparsers.required = True
 
-    parser_format = subparsers.add_parser("format", help="Perform formatting checks")
-    parser_build = subparsers.add_parser("build", help="Build Rust crates")
-    parser_clippy = subparsers.add_parser(
-        "clippy", help="Run Clippy on crates that request it"
-    )
-    parser_test = subparsers.add_parser("test", help="Run Rust tests")
     parser_veristat = subparsers.add_parser(
         "veristat", help="Run veristat verification on all schedulers"
     )
@@ -766,19 +565,9 @@ async def main():
         "symbol_name", nargs="?", help="Symbol name for debug mode (optional)"
     )
 
-    parser_all = subparsers.add_parser("all", help="Run all commands")
-
     args = parser.parse_args()
 
-    if args.command == "format":
-        await run_format()
-    elif args.command == "build":
-        await run_build()
-    elif args.command == "clippy":
-        await run_clippy()
-    elif args.command == "test":
-        await run_tests()
-    elif args.command == "veristat":
+    if args.command == "veristat":
         # Check if any debug mode arguments are provided
         debug_args = [args.kernel_name, args.scheduler_name, args.symbol_name]
         provided_args = [arg for arg in debug_args if arg is not None]
@@ -793,8 +582,6 @@ async def main():
             )
         else:
             await run_veristat()
-    elif args.command == "all":
-        await run_all()
 
 
 if __name__ == "__main__":
