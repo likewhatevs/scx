@@ -69,7 +69,7 @@ jobs:
         run: cargo nextest run --workspace --no-fail-fast
 
   arena-selftests:
-    needs: [cache-kernel, build]
+    needs: cache-kernel
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -92,8 +92,7 @@ jobs:
           run: target/debug/scx_arena_selftests
 
   test:
-    # gates on build to ensure compile + unit tests pass before running integration
-    needs: [cache-kernel, build]
+    needs: cache-kernel
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -111,6 +110,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: ./.github/actions/install-deps-action
+
+      - name: Install veristat
+        run: |
+          git clone --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
+          make -C /tmp/veristat/src -j$(nproc)
+          sudo install /tmp/veristat/src/veristat /usr/local/bin/
+
+      - name: Install cargo-veristat
+        run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
 
       - name: Build scheduler
         run: cargo build -p ${{ matrix.scheduler }}
@@ -130,41 +138,12 @@ jobs:
               --affinity 1 --affinity-delay 1 --affinity-pin &
             timeout --foreground --preserve-status 45 \
               target/debug/${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
-
-  veristat:
-    needs: [cache-kernel, build]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/install-deps-action
-
-      - name: Install veristat
-        run: |
-          git clone --depth 1 https://github.com/libbpf/veristat /tmp/veristat
-          make -C /tmp/veristat -j$(nproc)
-          sudo install /tmp/veristat/veristat /usr/local/bin/
-
-      - name: Install cargo-veristat
-        run: cargo install --git https://github.com/likewhatevs/cargo-veristat --locked
-
-      - name: Veristat
-        uses: likewhatevs/vng-action@main
-        with:
-          name: sched_ext_for-next
-          kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
-          kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
-          kconfig: kernel.config
-          version: v3
-          cpus: 10
-          memory: 10G
-          run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat
+            cargo veristat ${{ matrix.scheduler }}
 
   required-checks:
-    needs: [lint, build, arena-selftests, test, veristat]
+    needs: [lint, build, arena-selftests, test]
     runs-on: ubuntu-latest
     if: always()
     env:
