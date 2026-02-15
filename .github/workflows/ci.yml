@@ -170,7 +170,7 @@ jobs:
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat --profile ci scx_${{ matrix.scheduler }}
+            cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }}
 
   veristat:
     needs: kernel
@@ -227,7 +227,9 @@ jobs:
           run: |
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
-            cargo veristat --profile ci scx_${{ matrix.scheduler }}
+            GFM=--stderr-gfm-erronly
+            case "${{ matrix.kernel.name }}" in *stable*) GFM=--stderr-gfm ;; esac
+            cargo veristat --profile ci $GFM scx_${{ matrix.scheduler }}
 
   required-checks:
     needs: [lint, build, arena-selftests, test, veristat]
