@@ -76,7 +76,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Check
-        run: cargo check --profile ci --locked
+        run: cargo check --profile ci --locked -j1
 
       - name: Check vmlinux sync
         run: |
@@ -85,7 +85,7 @@ jobs:
           diff --no-dereference -qr scheds/vmlinux/ "$tmpdir/vmlinux/"
 
       - name: Unit tests
-        run: cargo nextest run --cargo-profile ci --workspace --no-fail-fast
+        run: cargo nextest run --cargo-profile ci --workspace --no-fail-fast -j1
 
   arena-selftests:
     needs: kernel
