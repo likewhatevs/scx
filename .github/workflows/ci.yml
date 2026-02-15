@@ -230,6 +230,47 @@ jobs:
             cargo build --profile ci -p scx_${{ matrix.scheduler }}
             cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
+  benchmark:
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        scheduler: [cake, cosmos, lavd, layered, mitosis]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
+
+      - name: Build scheduler (HEAD)
+        run: cargo build --release -p scx_${{ matrix.scheduler }}
+
+      - name: 'Benchmark HEAD: ${{ matrix.scheduler }}'
+        run: |
+          chmod +x .github/scripts/bench-harness.sh
+          .github/scripts/bench-harness.sh \
+            target/release/scx_${{ matrix.scheduler }} \
+            PR \
+            "${{ github.event.pull_request.head.sha }}"
+
+      - name: Checkout base and rebuild
+        run: |
+          git checkout ${{ github.event.pull_request.base.sha }}
+          cargo clean
+          cargo build --release -p scx_${{ matrix.scheduler }}
+
+      - name: 'Benchmark BASE: ${{ matrix.scheduler }}'
+        run: |
+          .github/scripts/bench-harness.sh \
+            target/release/scx_${{ matrix.scheduler }} \
+            BASE \
+            "${{ github.event.pull_request.base.sha }}"
+
   required-checks:
     needs: [lint, build, arena-selftests, test, veristat]
     runs-on: ubuntu-latest
