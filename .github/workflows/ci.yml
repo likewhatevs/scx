@@ -171,7 +171,7 @@ jobs:
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
             cargo build --profile ci -p scx_${{ matrix.scheduler }}
-            cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
+            cargo veristat --profile ci --stderr-gfm scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
   veristat:
     needs: kernel
@@ -229,7 +229,7 @@ jobs:
             export HOME=/home/runner
             export PATH="$HOME/.cargo/bin:$PATH"
             cargo build --profile ci -p scx_${{ matrix.scheduler }}
-            cargo veristat --profile ci ${{ contains(matrix.kernel.name, 'stable') && '--stderr-gfm' || '--stderr-gfm-erronly' }} scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
+            cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
   required-checks:
     needs: [lint, build, arena-selftests, test, veristat]
