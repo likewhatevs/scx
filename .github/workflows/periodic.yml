@@ -116,7 +116,7 @@ jobs:
             export PATH="$HOME/.cargo/bin:$PATH"
             GFM=--stderr-gfm-erronly
             case "${{ matrix.kernel.name }}" in *stable*) GFM=--stderr-gfm ;; esac
-            cargo veristat --profile ci $GFM scx_${{ matrix.scheduler }}
+            cargo veristat --profile ci $GFM scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
   notify:
     needs: integration-test
