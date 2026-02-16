@@ -33,6 +33,6 @@ jobs:
           use_bedrock: "true"
           show_full_output: "true"
           claude_args: |
-            --model us.anthropic.claude-opus-4-5-20251101-v1:0
+            --model us.anthropic.claude-sonnet-4-5-20250929-v1:0
           prompt: |
             Say "Hello from Claude Code Action" and list the files in the current directory.
