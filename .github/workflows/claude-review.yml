@@ -1,0 +1,26 @@
+name: claude-review
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  claude-review:
+    runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_bedrock: "true"
+          prompt: |
+            Say "Hello from Claude Code Action" and list the files in the current directory.
