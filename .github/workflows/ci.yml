@@ -206,10 +206,6 @@ jobs:
           - scheduler: layered
             kernel:
               name: scx__stable__6_13
-          # lavd hits verifier issues on 6.13
-          - scheduler: lavd
-            kernel:
-              name: scx__stable__6_13
           # lavd_cgroup_set_bandwidth not present in 6.16 kernel
           - scheduler: lavd
             kernel:
