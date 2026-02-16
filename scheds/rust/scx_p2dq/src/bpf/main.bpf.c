@@ -1371,8 +1371,20 @@ static s32 pick_idle_cpu(struct task_struct *p, task_ctx *taskc,
 	if (!idle_cpumask)
 		goto found_cpu;
 
-	if (bpf_cpumask_test_cpu(prev_cpu, idle_cpumask) &&
-	    scx_bpf_test_and_clear_cpu_idle(prev_cpu)) {
+	/*
+	 * Prefer selecting an idle core over prev_cpu to improve LLC
+	 * utilization and reduce sibling contention on SMT systems.
+	 */
+	if (bpf_cpumask_test_cpu(prev_cpu, idle_cpumask)) {
+		s32 idle_core = scx_bpf_pick_idle_cpu(idle_cpumask,
+						      SCX_PICK_IDLE_CORE);
+		if (idle_core >= 0) {
+			cpu = idle_core;
+			scx_bpf_test_and_clear_cpu_idle(cpu);
+			*is_idle = true;
+			goto found_cpu;
+		}
+		scx_bpf_test_and_clear_cpu_idle(prev_cpu);
 		*is_idle = true;
 		goto found_cpu;
 	}
