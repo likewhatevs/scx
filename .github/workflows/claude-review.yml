@@ -24,14 +24,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-west-2
 
-      - uses: anthropics/claude-code-action@v1
-        env:
-          ANTHROPIC_DEFAULT_SONNET_MODEL: us.anthropic.claude-sonnet-4-5-20250929-v1:0
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: us.anthropic.claude-haiku-4-5-20251001-v1:0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          use_bedrock: "true"
-          show_full_output: "true"
-          claude_args: "--model ${{ secrets.AWS_INFERENCE_PROFILE }}"
-          prompt: |
-            Say "Hello from Claude Code Action" and list the files in the current directory.
+      - name: Test Bedrock invoke
+        run: |
+          echo "Profile: ${{ secrets.AWS_INFERENCE_PROFILE }}" | sed 's/[0-9]\{12\}/XXXX/g'
+          aws bedrock-runtime invoke-model \
+            --model-id "${{ secrets.AWS_INFERENCE_PROFILE }}" \
+            --region us-west-2 \
+            --content-type application/json \
+            --accept application/json \
+            --body '{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"Say hi"}]}' \
+            /tmp/out.json && cat /tmp/out.json || echo "FAILED: $?"
