@@ -26,13 +26,13 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         env:
-          ANTHROPIC_DEFAULT_OPUS_MODEL: anthropic.claude-opus-4-6-v1
           ANTHROPIC_DEFAULT_SONNET_MODEL: anthropic.claude-sonnet-4-5-20250929-v1:0
           ANTHROPIC_DEFAULT_HAIKU_MODEL: anthropic.claude-haiku-4-5-20251001-v1:0
-          DEBUG_CLAUDE_AGENT_SDK: "1"
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           use_bedrock: "true"
           show_full_output: "true"
+          claude_args: |
+            --model anthropic.claude-opus-4-6-v1
           prompt: |
             Say "Hello from Claude Code Action" and list the files in the current directory.
