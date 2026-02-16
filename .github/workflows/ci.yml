@@ -4,8 +4,8 @@ on:
   pull_request:
   merge_group:
   push:
-    branches-ignore:
-      - gh-readonly-queue/main/**
+    branches:
+      - main
 
 env:
   BPF_CLANG: clang-19
