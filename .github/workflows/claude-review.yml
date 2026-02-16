@@ -22,15 +22,15 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-west-2
+          aws-region: us-east-1
 
-      - name: Test Bedrock invoke
-        run: |
-          BODY=$(echo -n '{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"Say hi"}]}' | base64 -w0)
-          aws bedrock-runtime invoke-model \
-            --model-id "${{ secrets.AWS_INFERENCE_PROFILE }}" \
-            --region us-east-1 \
-            --content-type application/json \
-            --accept application/json \
-            --body "$BODY" \
-            /tmp/out.json && cat /tmp/out.json || echo "FAILED: $?"
+      - uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_MODEL: ${{ secrets.AWS_INFERENCE_PROFILE }}
+          ANTHROPIC_SMALL_FAST_MODEL: ${{ secrets.AWS_INFERENCE_PROFILE }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_bedrock: "true"
+          show_full_output: "true"
+          prompt: |
+            Say "Hello from Claude Code Action" and list the files in the current directory.
