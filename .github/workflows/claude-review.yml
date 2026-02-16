@@ -24,5 +24,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-west-2
 
-      - name: List available Bedrock models
-        run: aws bedrock list-foundation-models --region us-west-2 --by-provider anthropic --query 'modelSummaries[].modelId' --output table
+      - uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_DEFAULT_OPUS_MODEL: anthropic.claude-opus-4-6-v1
+          ANTHROPIC_DEFAULT_SONNET_MODEL: anthropic.claude-sonnet-4-5-20250929-v1:0
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: anthropic.claude-haiku-4-5-20251001-v1:0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          use_bedrock: "true"
+          prompt: |
+            Say "Hello from Claude Code Action" and list the files in the current directory.
