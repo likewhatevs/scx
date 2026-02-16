@@ -1,7 +1,6 @@
 name: claude-review
 
 on:
-  push:
   pull_request:
 
 jobs:
