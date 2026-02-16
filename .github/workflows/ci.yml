@@ -243,7 +243,7 @@ jobs:
       - name: Detect changed schedulers
         id: detect
         run: |
-          bench_set="cake cosmos lavd layered mitosis"
+          bench_set="cake cosmos lavd layered mitosis p2dq"
           base="${{ github.event.pull_request.base.sha }}"
           detected=$(git diff --name-only "$base" HEAD | { grep -oP 'scheds/rust/scx_\K[^/]+' || true; } | sort -u)
           filtered=""
