@@ -26,11 +26,11 @@ jobs:
 
       - name: Test Bedrock invoke
         run: |
-          echo "Profile: ${{ secrets.AWS_INFERENCE_PROFILE }}" | sed 's/[0-9]\{12\}/XXXX/g'
+          echo '{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"Say hi"}]}' > /tmp/body.json
           aws bedrock-runtime invoke-model \
             --model-id "${{ secrets.AWS_INFERENCE_PROFILE }}" \
-            --region us-west-2 \
+            --region us-east-1 \
             --content-type application/json \
             --accept application/json \
-            --body '{"anthropic_version":"bedrock-2023-05-31","max_tokens":32,"messages":[{"role":"user","content":"Say hi"}]}' \
+            --body file:///tmp/body.json \
             /tmp/out.json && cat /tmp/out.json || echo "FAILED: $?"
