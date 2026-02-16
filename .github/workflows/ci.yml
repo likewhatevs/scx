@@ -65,7 +65,8 @@ jobs:
           run: echo ok
 
   build:
-    runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    #runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
