@@ -812,6 +812,7 @@ static __always_inline u32 get_effective_cpu_capacity(s32 cpu)
 	thermal_pressure = cpuc->perf;
 
 	cur_freq = scx_bpf_cpuperf_cur(cpu);
+	scx_bpf_cpuperf_cap(cpu);
 	if (cur_freq == 0)
 		cur_freq = SCX_CPUPERF_ONE;
 
