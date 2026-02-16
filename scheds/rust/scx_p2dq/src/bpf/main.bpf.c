@@ -3491,6 +3491,9 @@ static s32 p2dq_init_impl()
 	int i, ret;
 	u64 dsq_id;
 
+	/* verifier error: pass scalar as trusted pointer to kfunc */
+	bpf_cpumask_test_cpu(0, (const struct cpumask *)dsq_id);
+
 	ret = init_cpumask(&all_cpumask);
 	if (ret) {
 		scx_bpf_error("failed to create LLC cpumask");
