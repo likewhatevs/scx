@@ -229,6 +229,9 @@ jobs:
           sudo install /tmp/veristat/src/veristat /usr/local/bin/
           cargo install -q --git https://github.com/likewhatevs/cargo-veristat --locked
 
+      - name: Build scheduler
+        run: cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
+
       - name: 'Verify: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
         uses: likewhatevs/vng-action@v0.1.0
         with:
