@@ -60,13 +60,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 'Cache kernel: ${{ matrix.name }}'
-        uses: likewhatevs/vng-action@main
+        uses: likewhatevs/vng-action@v0.1.0
         with:
           name: ${{ matrix.name }}
           kernel-url: ${{ matrix.kernel-url }}
           kernel-tag: ${{ matrix.kernel-tag }}
           kconfig: kernel.config
           version: v16
+          verbose: false
           run: echo ok
 
   build:
@@ -104,7 +105,7 @@ jobs:
         run: cargo build -q --profile ci -p scx_arena_selftests --locked
 
       - name: Arena selftests
-        uses: likewhatevs/vng-action@main
+        uses: likewhatevs/vng-action@v0.1.0
         with:
           name: scx__sched_ext__for-next
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
@@ -113,6 +114,7 @@ jobs:
           version: v16
           cpus: 10
           memory: 13G
+          verbose: false
           run: target/ci/scx_arena_selftests
 
   test:
@@ -146,7 +148,7 @@ jobs:
         run: cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
 
       - name: 'Test: ${{ matrix.scheduler }}'
-        uses: likewhatevs/vng-action@main
+        uses: likewhatevs/vng-action@v0.1.0
         with:
           name: scx__sched_ext__for-next
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
@@ -155,6 +157,7 @@ jobs:
           version: v16
           cpus: 10
           memory: 13G
+          verbose: false
           run: |
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
               --affinity 1 --affinity-delay 1 --affinity-pin &
@@ -162,7 +165,7 @@ jobs:
               target/ci/scx_${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
 
       - name: 'Verify: ${{ matrix.scheduler }}'
-        uses: likewhatevs/vng-action@main
+        uses: likewhatevs/vng-action@v0.1.0
         with:
           name: scx__sched_ext__for-next
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
@@ -172,9 +175,8 @@ jobs:
           cpus: 10
           memory: 13G
           network: user
+          verbose: false
           run: |
-            export HOME=/home/runner
-            export PATH="$HOME/.cargo/bin:$PATH"
             cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
             cargo veristat --profile ci --stderr-gfm scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
@@ -228,7 +230,7 @@ jobs:
           cargo install -q --git https://github.com/likewhatevs/cargo-veristat --locked
 
       - name: 'Verify: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
-        uses: likewhatevs/vng-action@main
+        uses: likewhatevs/vng-action@v0.1.0
         with:
           name: ${{ matrix.kernel.name }}
           kernel-url: ${{ matrix.kernel.url }}
@@ -238,9 +240,8 @@ jobs:
           cpus: 10
           memory: 13G
           network: user
+          verbose: false
           run: |
-            export HOME=/home/runner
-            export PATH="$HOME/.cargo/bin:$PATH"
             cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
             cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
