@@ -14,15 +14,51 @@ concurrency:
 
 env:
   BPF_CLANG: clang-19
+  SCX_PACKAGES: "pkg-config clang-19 llvm-19 libelf-dev libzstd-dev protobuf-compiler libseccomp-dev libcap-ng-dev"
   SCHED_EXT_KERNEL_URL: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
   SCHED_EXT_KERNEL_TAG: for-next
 
 jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          cache-all-crates: true
+      - run: cargo fetch --locked
+
+      - uses: actions/cache@v4
+        id: tools-cache
+        with:
+          path: .veristat-tools
+          key: veristat-tools-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: veristat-tools-${{ runner.arch }}-
+
+      - uses: ./.github/actions/install-deps-action
+
+      - name: Build tools
+        run: |
+          mkdir -p .veristat-tools/bin
+          git clone -q --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
+          make -s -C /tmp/veristat/src -j$(nproc)
+          cp /tmp/veristat/src/veristat .veristat-tools/bin/
+          cargo install -q --git https://github.com/likewhatevs/cargo-veristat --locked --root .veristat-tools
+
   lint:
+    needs: [fetch]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          save-if: false
       - uses: ./.github/actions/install-deps-action
       - name: Format Rust
         run: cargo fmt --check
@@ -34,48 +70,55 @@ jobs:
         run: |
           for pkg in $(cargo metadata --format-version 1 | \
             jq -r '.packages[] | select(.metadata.scx.ci.use_clippy == true) | .name'); do
-            cargo clippy -q --no-deps -p "$pkg" -- -Dwarnings
+            cargo clippy -q --no-deps --locked -p "$pkg" -- -Dwarnings
           done
 
   kernel:
-    runs-on: ubuntu-24.04
     strategy:
       matrix:
-        include:
+        kernel:
           - name: scx__sched_ext__for-next
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
-            kernel-tag: for-next
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
+            tag: for-next
           - name: scx__bpf__bpf-next
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
-            kernel-tag: master
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
+            tag: master
           - name: scx__stable__linux-rolling-stable
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-            kernel-tag: linux-rolling-stable
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            tag: linux-rolling-stable
           - name: scx__stable__6_13
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-            kernel-tag: linux-6.13.y
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            tag: linux-6.13.y
           - name: scx__stable__6_16
-            kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
-            kernel-tag: linux-6.16.y
+            url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+            tag: linux-6.16.y
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: 'Cache kernel: ${{ matrix.name }}'
-        uses: likewhatevs/vng-action@v0.1.0
+      - name: 'Cache kernel: ${{ matrix.kernel.name }} (${{ runner.arch }})'
+        uses: likewhatevs/vng-action@v0.2.0
         with:
-          name: ${{ matrix.name }}
-          kernel-url: ${{ matrix.kernel-url }}
-          kernel-tag: ${{ matrix.kernel-tag }}
+          name: ${{ matrix.kernel.name }}__${{ runner.arch }}
+          kernel-url: ${{ matrix.kernel.url }}
+          kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v16
+          version: v17
+          packages: ${{ env.SCX_PACKAGES }}
           verbose: false
           run: echo ok
 
   build:
+    needs: [fetch]
     if: github.event_name == 'merge_group'
     runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          save-if: false
       - uses: ./.github/actions/install-deps-action
       - uses: taiki-e/install-action@v2
         with:
@@ -91,34 +134,45 @@ jobs:
           diff --no-dereference -qr scheds/vmlinux/ "$tmpdir/vmlinux/"
 
       - name: Unit tests
-        run: cargo nextest run --cargo-profile ci --workspace --no-fail-fast --status-level fail --success-output never
+        run: cargo nextest run --cargo-profile ci --workspace --locked --no-fail-fast --status-level fail --success-output never
 
   arena-selftests:
-    needs: kernel
+    needs: [kernel, fetch]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/install-deps-action
-
-      - name: Build
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          save-if: false
+      - run: echo /usr/lib/llvm-19/bin >> $GITHUB_PATH
+      - name: Install build dependencies
+        uses: nick-fields/retry@v3
+        with:
+          timeout_seconds: 90
+          max_attempts: 3
+          command: |
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends -qq ${{ env.SCX_PACKAGES }}
+      - name: Build arena selftests
         run: cargo build -q --profile ci -p scx_arena_selftests --locked
 
       - name: Arena selftests
-        uses: likewhatevs/vng-action@v0.1.0
+        uses: likewhatevs/vng-action@v0.2.0
         with:
-          name: scx__sched_ext__for-next
+          name: scx__sched_ext__for-next__${{ runner.arch }}
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v16
-          cpus: 10
-          memory: 13G
+          version: v17
+          network: user
           verbose: false
           run: target/ci/scx_arena_selftests
 
   test:
-    needs: kernel
+    needs: [kernel, fetch]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -135,28 +189,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/install-deps-action
-
-      - name: Install cargo veristat
-        run: |
-          git clone -q --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
-          make -s -C /tmp/veristat/src -j$(nproc)
-          sudo install /tmp/veristat/src/veristat /usr/local/bin/
-          cargo install -q --git https://github.com/likewhatevs/cargo-veristat --locked
-
-      - name: Build scheduler
-        run: cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
-
-      - name: 'Test: ${{ matrix.scheduler }}'
-        uses: likewhatevs/vng-action@v0.1.0
+      - uses: swatinem/rust-cache@v2
         with:
-          name: scx__sched_ext__for-next
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          save-if: false
+      - run: echo /usr/lib/llvm-19/bin >> $GITHUB_PATH
+      - uses: actions/cache/restore@v4
+        with:
+          path: .veristat-tools
+          key: veristat-tools-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: veristat-tools-${{ runner.arch }}-
+          fail-on-cache-miss: true
+      - run: echo "$GITHUB_WORKSPACE/.veristat-tools/bin" >> $GITHUB_PATH
+      - name: Install build dependencies
+        uses: nick-fields/retry@v3
+        with:
+          timeout_seconds: 90
+          max_attempts: 3
+          command: |
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends -qq ${{ env.SCX_PACKAGES }}
+      - name: 'Build: scx_${{ matrix.scheduler }}'
+        run: cargo build -q --profile ci --locked -p scx_${{ matrix.scheduler }}
+
+      - name: 'Test: ${{ matrix.scheduler }} (${{ runner.arch }})'
+        uses: likewhatevs/vng-action@v0.2.0
+        with:
+          name: scx__sched_ext__for-next__${{ runner.arch }}
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v16
-          cpus: 10
-          memory: 13G
+          version: v17
+          network: user
           verbose: false
           run: |
             stress-ng -t 31 --aggressive -M -c $(nproc) -f $(nproc) \
@@ -164,24 +229,20 @@ jobs:
             timeout --foreground --preserve-status 45 \
               target/ci/scx_${{ matrix.scheduler }} ${{ matrix.flags || '-v' }}
 
-      - name: 'Verify: ${{ matrix.scheduler }}'
-        uses: likewhatevs/vng-action@v0.1.0
+      - name: 'Verify: ${{ matrix.scheduler }} (${{ runner.arch }})'
+        uses: likewhatevs/vng-action@v0.2.0
         with:
-          name: scx__sched_ext__for-next
+          name: scx__sched_ext__for-next__${{ runner.arch }}
           kernel-url: ${{ env.SCHED_EXT_KERNEL_URL }}
           kernel-tag: ${{ env.SCHED_EXT_KERNEL_TAG }}
           kconfig: kernel.config
-          version: v16
-          cpus: 10
-          memory: 13G
+          version: v17
           network: user
           verbose: false
-          run: |
-            cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
-            cargo veristat --profile ci --stderr-gfm scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
+          run: cargo veristat --profile ci --stderr-gfm scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
   veristat:
-    needs: kernel
+    needs: [kernel, fetch]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -220,33 +281,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: ./.github/actions/install-deps-action
-
-      - name: Install cargo veristat
-        run: |
-          git clone -q --depth 1 --recurse-submodules https://github.com/libbpf/veristat /tmp/veristat
-          make -s -C /tmp/veristat/src -j$(nproc)
-          sudo install /tmp/veristat/src/veristat /usr/local/bin/
-          cargo install -q --git https://github.com/likewhatevs/cargo-veristat --locked
-
-      - name: Build scheduler
-        run: cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          save-if: false
+      - run: echo /usr/lib/llvm-19/bin >> $GITHUB_PATH
+      - uses: actions/cache/restore@v4
+        with:
+          path: .veristat-tools
+          key: veristat-tools-${{ runner.arch }}-${{ github.run_id }}
+          restore-keys: veristat-tools-${{ runner.arch }}-
+          fail-on-cache-miss: true
+      - run: echo "$GITHUB_WORKSPACE/.veristat-tools/bin" >> $GITHUB_PATH
+      - name: Install build dependencies
+        uses: nick-fields/retry@v3
+        with:
+          timeout_seconds: 90
+          max_attempts: 3
+          command: |
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends -qq ${{ env.SCX_PACKAGES }}
+      - name: 'Build: scx_${{ matrix.scheduler }}'
+        run: cargo build -q --profile ci --locked -p scx_${{ matrix.scheduler }}
 
       - name: 'Verify: ${{ matrix.scheduler }} (${{ matrix.kernel.name }})'
-        uses: likewhatevs/vng-action@v0.1.0
+        uses: likewhatevs/vng-action@v0.2.0
         with:
-          name: ${{ matrix.kernel.name }}
+          name: ${{ matrix.kernel.name }}__${{ runner.arch }}
           kernel-url: ${{ matrix.kernel.url }}
           kernel-tag: ${{ matrix.kernel.tag }}
           kconfig: kernel.config
-          version: v16
-          cpus: 10
-          memory: 13G
+          version: v17
           network: user
           verbose: false
-          run: |
-            cargo build -q --profile ci -p scx_${{ matrix.scheduler }}
-            cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
+          run: cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
 
   benchmark-matrix:
     if: github.event_name == 'pull_request'
@@ -286,7 +355,7 @@ jobs:
           fi
 
   benchmark:
-    needs: benchmark-matrix
+    needs: [fetch, benchmark-matrix]
     if: needs.benchmark-matrix.outputs.has_schedulers == 'true'
     runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     timeout-minutes: 30
@@ -300,10 +369,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          save-if: false
       - uses: ./.github/actions/install-deps-action
 
       - name: Build scheduler (HEAD)
-        run: cargo build -q --release -p scx_${{ matrix.scheduler }}
+        run: cargo build -q --release --locked -p scx_${{ matrix.scheduler }}
 
       - name: 'Benchmark HEAD: ${{ matrix.scheduler }}'
         run: |
@@ -321,7 +395,7 @@ jobs:
         run: |
           git checkout ${{ steps.merge-base.outputs.sha }}
           cargo clean
-          cargo build -q --release -p scx_${{ matrix.scheduler }}
+          cargo build -q --release --locked -p scx_${{ matrix.scheduler }}
 
       - name: 'Benchmark BASE: ${{ matrix.scheduler }}'
         run: |
