@@ -14,9 +14,10 @@ concurrency:
 
 env:
   BPF_CLANG: clang-19
-  SCX_PACKAGES: "pkg-config clang-19 llvm-19 libelf-dev libzstd-dev protobuf-compiler libseccomp-dev libcap-ng-dev"
+  SCX_PACKAGES: "pkg-config lld clang clang-19 llvm-19 libelf-dev libzstd-dev protobuf-compiler libseccomp-dev libcap-ng-dev"
   SCHED_EXT_KERNEL_URL: https://git.kernel.org/pub/scm/linux/kernel/git/tj/sched_ext.git
   SCHED_EXT_KERNEL_TAG: for-next
+  RUSTFLAGS: "-C linker=clang -C link-arg=-fuse-ld=lld"
 
 jobs:
   fetch:
@@ -47,10 +48,48 @@ jobs:
           make -s -C /tmp/veristat/src -j$(nproc)
           cp /tmp/veristat/src/veristat .veristat-tools/bin/
           cargo install -q --git https://github.com/likewhatevs/cargo-veristat --locked --root .veristat-tools
+      - name: Fix permissions for cache
+        if: always()
+        run: sudo chown -R $(id -u):$(id -g) ~
 
   lint:
     needs: [fetch]
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/install-deps-action
+      - name: Format Rust
+        run: cargo fmt --check
+      - name: Format C
+        run: |
+          find tools/scxtop scheds/rust/scx_chaos scheds/rust/scx_mitosis \
+            -name '*.c' -o -name '*.h' | xargs clang-format --dry-run -Werror
+
+  clippy-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.pkgs.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-${{ runner.arch }}
+          cache-targets: false
+          save-if: false
+      - id: pkgs
+        run: |
+          echo "packages=$(cargo metadata --format-version 1 | \
+            jq -c '[.packages[] | select(.metadata.scx.ci.use_clippy == true) | .name]')" >> "$GITHUB_OUTPUT"
+
+  clippy:
+    needs: [fetch, clippy-matrix]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.clippy-matrix.outputs.packages) }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -60,18 +99,8 @@ jobs:
           cache-targets: false
           save-if: false
       - uses: ./.github/actions/install-deps-action
-      - name: Format Rust
-        run: cargo fmt --check
-      - name: Format C
-        run: |
-          find tools/scxtop scheds/rust/scx_chaos scheds/rust/scx_mitosis \
-            -name '*.c' -o -name '*.h' | xargs clang-format --dry-run -Werror
-      - name: Clippy
-        run: |
-          for pkg in $(cargo metadata --format-version 1 | \
-            jq -r '.packages[] | select(.metadata.scx.ci.use_clippy == true) | .name'); do
-            cargo clippy -q --no-deps --locked -p "$pkg" -- -Dwarnings
-          done
+      - name: 'Clippy: ${{ matrix.package }}'
+        run: cargo clippy -q --no-deps --locked -p "${{ matrix.package }}" -- -Dwarnings
 
   kernel:
     strategy:
@@ -106,6 +135,9 @@ jobs:
           packages: ${{ env.SCX_PACKAGES }}
           verbose: false
           run: echo ok
+      - name: Fix permissions for cache
+        if: always()
+        run: sudo chown -R $(id -u):$(id -g) ~
 
   build:
     needs: [fetch]
@@ -170,6 +202,9 @@ jobs:
           network: user
           verbose: false
           run: target/ci/scx_arena_selftests
+      - name: Fix permissions for cache
+        if: always()
+        run: sudo chown -R $(id -u):$(id -g) ~
 
   test:
     needs: [kernel, fetch]
@@ -240,6 +275,9 @@ jobs:
           network: user
           verbose: false
           run: cargo veristat --profile ci --stderr-gfm scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
+      - name: Fix permissions for cache
+        if: always()
+        run: sudo chown -R $(id -u):$(id -g) ~
 
   veristat:
     needs: [kernel, fetch]
@@ -316,6 +354,9 @@ jobs:
           network: user
           verbose: false
           run: cargo veristat --profile ci --stderr-gfm-erronly scx_${{ matrix.scheduler }} 2>>"$GITHUB_STEP_SUMMARY"
+      - name: Fix permissions for cache
+        if: always()
+        run: sudo chown -R $(id -u):$(id -g) ~
 
   benchmark-matrix:
     if: github.event_name == 'pull_request'
@@ -406,7 +447,7 @@ jobs:
 
   claude-review:
     if: "!cancelled() && github.event_name == 'pull_request'"
-    needs: [lint, build, arena-selftests, test, veristat, benchmark]
+    needs: [lint, clippy, build, arena-selftests, test, veristat, benchmark]
     runs-on: ${{ (github.repository_owner == 'likewhatevs' || github.repository_owner == 'sched-ext') && fromJSON('[ "self-hosted", "Linux", "X64", "large" ]') || 'ubuntu-24.04' }}
     continue-on-error: true
     permissions:
@@ -491,7 +532,7 @@ jobs:
             --max-turns 250
 
   required-checks:
-    needs: [lint, build, arena-selftests, test, veristat]
+    needs: [lint, clippy, build, arena-selftests, test, veristat]
     runs-on: ubuntu-latest
     if: always()
     env:
