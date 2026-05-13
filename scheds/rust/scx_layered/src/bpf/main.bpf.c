@@ -926,7 +926,7 @@ int BPF_PROG(tp_cgroup_attach_task, struct cgroup *cgrp, const char *cgrp_path,
 	thread_head = &leader->signal->thread_head;
 
 	if (!(next = bpf_task_acquire(leader))) {
-		scx_bpf_error("failed to acquire leader");
+		bpf_printk("scx_layered: tp_cgroup_attach_task: leader acquire failed");
 		return 0;
 	}
 

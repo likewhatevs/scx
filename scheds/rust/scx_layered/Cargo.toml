@@ -37,6 +37,10 @@ nvml-wrapper = "0.12"
 nix = { version = "0.31", features = ["sched"] }
 sysinfo = "0.38"
 
+[dependencies.ktstr]
+version = "0.4"
+optional = true
+
 [dev-dependencies]
 scx_utils = { path = "../../../rust/scx_utils", version = "1.1.0", features = ["testutils"] }
 
@@ -45,6 +49,7 @@ scx_cargo = { path = "../../../rust/scx_cargo", version = "1.1.0" }
 
 [features]
 enable_backtrace = []
+ktstr-tests = ["ktstr"]
 
 [package.metadata.appimage]
 auto_link = true
