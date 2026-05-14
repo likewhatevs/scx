@@ -181,10 +181,19 @@ static __always_inline int recalc_cell_llc_counts(u32 cell_idx, const struct cpu
 			}
 		}
 		if (dest_llc == LLC_INVALID) {
-			scx_bpf_error(
-				"recalc_cell_llc_counts: cell %u has no CPUs in any LLC; cannot drain (cell, llc=%u)",
-				cell_idx, llc);
-			return -EINVAL;
+			/* Cell drained entirely -- no surviving LLC.
+			 * Skip drain (nr_drained_tasks is not bumped).
+			 * Reached when the userspace serializer iterates
+			 * 0..max_cell_id+1 and a removed mid-range cell
+			 * has an empty cpumask with non-zero old cpu_cnt;
+			 * aborting the scheduler in this legitimate
+			 * cgroup-removal path is wrong. A later reconfig
+			 * that restores CPUs to this cell makes the
+			 * (cell, llc) DSQ reachable again, and dispatch
+			 * on those CPUs peeks it. Returning 0 widens the
+			 * caller contract: success no longer implies all
+			 * draining LLCs found a destination. */
+			return 0;
 		}
 
 		dsq_id_t src_dsq = get_cell_llc_dsq_id(cell_idx, llc);
