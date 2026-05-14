@@ -180,12 +180,8 @@ static __always_inline int recalc_cell_llc_counts(u32 cell_idx, const struct cpu
 				break;
 			}
 		}
-		if (dest_llc == LLC_INVALID) {
-			scx_bpf_error(
-				"recalc_cell_llc_counts: cell %u has no CPUs in any LLC; cannot drain (cell, llc=%u)",
-				cell_idx, llc);
-			return -EINVAL;
-		}
+		if (dest_llc == LLC_INVALID)
+			return 0;
 
 		dsq_id_t src_dsq = get_cell_llc_dsq_id(cell_idx, llc);
 		dsq_id_t dst_dsq = get_cell_llc_dsq_id(cell_idx, dest_llc);
