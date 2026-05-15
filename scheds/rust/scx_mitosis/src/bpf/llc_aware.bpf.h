@@ -462,10 +462,16 @@ static inline int update_task_llc_assignment(struct task_struct *p, struct task_
 	}
 	bpf_cpumask_and(cpumask, (const struct cpumask *)cpumask, llc_mask);
 
-	/* If empty after intersection, nothing can run here */
+	/* apply_cell_config publishes cpu_cnt before cell_cpumask, so
+	 * pick_llc_for_task may name an LLC absent from the stale
+	 * cpumask. Restore (cell ∩ affinity) so dispatch sees a usable
+	 * mask and bail with -EAGAIN; callers exit early and the next
+	 * mitosis_running/enqueue retries after publish completes. */
 	if (bpf_cpumask_empty((const struct cpumask *)cpumask)) {
-		scx_bpf_error("Empty cpumask after intersection");
-		return -EINVAL;
+		const struct cpumask *cm = lookup_cell_cpumask(tctx->cell);
+		if (cm)
+			bpf_cpumask_and(cpumask, cm, p->cpus_ptr);
+		return -EAGAIN;
 	}
 
 	/* --- Point to the correct (cell,LLC) DSQ and set vtime baseline --- */
