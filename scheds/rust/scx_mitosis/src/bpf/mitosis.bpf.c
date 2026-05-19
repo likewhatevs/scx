@@ -2362,9 +2362,30 @@ int apply_cell_config(void *ctx)
 			 */
 			continue;
 
-		cgc = lookup_cgrp_ctx(cg);
-		if (!cgc)
-			return -ENOENT;
+		/*
+		 * Lazy-init: userspace's inotify watch can see a freshly
+		 * created cgroup and add it to the config before SCX's
+		 * mitosis_cgroup_init callback has populated cgrp_ctxs
+		 * for it. The non-fallible lookup_cgrp_ctx aborts the
+		 * scheduler via scx_bpf_error in that window; the
+		 * symptom in the dump is:
+		 *
+		 *   bpf_prog_apply_cell_config+...
+		 *   scx_bpf_error_bstr
+		 *   scx_exit
+		 *     "cgrp_ctx lookup failed for cgid <N>"
+		 *
+		 * Create the storage on the spot — cell + cell_owner are
+		 * written below. When mitosis_cgroup_init eventually
+		 * fires it short-circuits on existing storage (see the
+		 * lookup_cgrp_ctx_fallible(cgrp) early-return in
+		 * init_cgrp_ctx_with_ancestors).
+		 */
+		cgc = bpf_cgrp_storage_get(&cgrp_ctxs, cg, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+		if (!cgc) {
+			scx_bpf_error("cgrp_ctx F_CREATE failed for cgid %llu", cgid);
+			return -ENOMEM;
+		}
 
 		cell = lookup_cell(cell_id);
 		if (!cell)
