@@ -29,6 +29,7 @@ struct layered_timer {
 
 enum layer_timer_callbacks {
 	ANTISTALL_TIMER,
+	BW_TIMER,
 	MAX_TIMERS,
 };
 

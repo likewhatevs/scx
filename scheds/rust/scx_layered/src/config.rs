@@ -141,6 +141,10 @@ pub struct LayerCommon {
     /// deciding whether a layer should shrink. 0 disables peak holding.
     #[serde(default)]
     pub util_peak_half_life_ms: u64,
+    /// Maximum CPU utilization the layer may consume, in units of whole
+    /// CPUs (0.2 = 20% of one CPU). Tasks are throttled once exceeded.
+    #[serde(default)]
+    pub util_max: Option<f64>,
     #[serde(default)]
     pub perf: u64,
     #[serde(default)]

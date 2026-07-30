@@ -77,6 +77,8 @@ const LSTAT_XLAYER_REWAKE: usize = bpf_intf::layer_stat_id_LSTAT_XLAYER_REWAKE a
 const LSTAT_LLC_DRAIN_TRY: usize = bpf_intf::layer_stat_id_LSTAT_LLC_DRAIN_TRY as usize;
 const LSTAT_LLC_DRAIN: usize = bpf_intf::layer_stat_id_LSTAT_LLC_DRAIN as usize;
 const LSTAT_SKIP_REMOTE_NODE: usize = bpf_intf::layer_stat_id_LSTAT_SKIP_REMOTE_NODE as usize;
+const LSTAT_BW_THROTTLE: usize = bpf_intf::layer_stat_id_LSTAT_BW_THROTTLE as usize;
+const LSTAT_BW_THROTTLE_NS: usize = bpf_intf::layer_stat_id_LSTAT_BW_THROTTLE_NS as usize;
 
 const LSTAT_RUNQ_LAT_BASE: usize = bpf_intf::layer_stat_id_LSTAT_RUNQ_LAT_BASE as usize;
 const NR_RUNQ_LAT_BUCKETS: usize = bpf_intf::consts_NR_RUNQ_LAT_BUCKETS as usize;
@@ -224,6 +226,10 @@ pub struct LayerStats {
     pub llc_drain: f64,
     #[stat(desc = "% skip LLC dispatch on remote node")]
     pub skip_remote_node: f64,
+    #[stat(desc = "count of times the layer was throttled by util_max")]
+    pub bw_throttle: u64,
+    #[stat(desc = "duration throttled by util_max in us")]
+    pub bw_throttle_us: u64,
     #[stat(desc = "mask of allocated CPUs", _om_skip)]
     pub cpus: Vec<u64>,
     #[stat(desc = "count of CPUs assigned")]
@@ -358,6 +364,8 @@ impl LayerStats {
             llc_drain_try: lstat_pct(LSTAT_LLC_DRAIN_TRY),
             llc_drain: lstat_pct(LSTAT_LLC_DRAIN),
             skip_remote_node: lstat_pct(LSTAT_SKIP_REMOTE_NODE),
+            bw_throttle: lstat(LSTAT_BW_THROTTLE),
+            bw_throttle_us: lstat(LSTAT_BW_THROTTLE_NS) / 1000,
             cpus: layer.cpus.as_raw_slice().to_vec(),
             cur_nr_cpus: layer.cpus.weight() as u32,
             min_nr_cpus: nr_cpus_range.0 as u32,
@@ -496,6 +504,17 @@ impl LayerStats {
             fmt_pct(self.llc_drain_try),
             fmt_pct(self.skip_remote_node),
         )?;
+
+        // util_max throttling, only shown when it fired
+        if self.bw_throttle > 0 || self.bw_throttle_us > 0 {
+            writeln!(
+                w,
+                "  {:<7} cnt={} time={}",
+                "throttle",
+                fmt_num(self.bw_throttle),
+                fmt_duration_ms(self.bw_throttle_us as f64 / 1000.0),
+            )?;
+        }
 
         // per-node utilization, load, and pinned utilization (multi-node only)
         if self.node_utils.len() > 1 {

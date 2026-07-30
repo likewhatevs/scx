@@ -41,6 +41,7 @@ enum consts {
 	MIN_LAYER_WEIGHT	= 1,
 	DEFAULT_LAYER_WEIGHT	= 100,
 	USAGE_HALF_LIFE		= 100000000,	/* 100ms */
+	LAYER_BW_PERIOD_NS	= 100000000,	/* 100ms, util_max replenish period */
 	RUNTIME_DECAY_FACTOR	= 4,
 	DUTY_CYCLE_SHIFT	= 20,		/* duty_cycle 1.0 = 1 << 20 */
 	LAYER_LAT_DECAY_FACTOR	= 32,
@@ -157,6 +158,8 @@ enum layer_stat_id {
 	LSTAT_LLC_DRAIN_TRY,
 	LSTAT_LLC_DRAIN,
 	LSTAT_SKIP_REMOTE_NODE,
+	LSTAT_BW_THROTTLE,
+	LSTAT_BW_THROTTLE_NS,
 	LSTAT_RUNQ_LAT_BASE,
 	LSTAT_RUNQ_LAT_END = LSTAT_RUNQ_LAT_BASE + NR_RUNQ_LAT_BUCKETS - 1,
 	NR_LSTATS,
@@ -196,6 +199,7 @@ struct cpu_ctx {
 	bool			running_fallback;
 	u64			used_at;
 	bool			is_protected;
+	bool			bw_lo_fb_skipped;
 
 	u64			layer_usages[MAX_LAYERS][NR_LAYER_USAGES];
 	u64			node_pinned_usage[MAX_LAYERS];
@@ -391,6 +395,15 @@ struct layer {
 	u64			disallow_open_after_ns;
 	u64			disallow_preempt_after_ns;
 	u64			xllc_mig_min_ns;
+
+	/*
+	 * CPU bandwidth cap (util_max). bw_quota_ns worth of budget is
+	 * granted every LAYER_BW_PERIOD_NS. 0 quota means unlimited.
+	 */
+	u64			bw_quota_ns;
+	s64			bw_budget_ns;
+	u64			bw_throttled_at;
+	bool			bw_throttled;
 
 	int			kind;
 	bool			preempt;

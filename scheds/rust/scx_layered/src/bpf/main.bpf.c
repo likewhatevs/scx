@@ -52,6 +52,7 @@ const volatile u32 nr_on_layers;	/* open && !preempt */
 const volatile u32 nr_gp_layers;	/* grouped && preempt */
 const volatile u32 nr_gn_layers;	/* grouped && !preempt */
 const volatile u32 nr_excl_layers;
+const volatile u32 nr_bw_layers = 1;	/* layers with util_max, !0 for veristat */
 const volatile bool kfuncs_supported_in_syscall = true;
 const volatile u64 min_open_layer_disallow_open_after_ns;
 const volatile u64 min_open_layer_disallow_preempt_after_ns;
@@ -156,6 +157,14 @@ static __always_inline struct layer *lookup_layer(u32 id)
 		return NULL;
 	}
 	return &layers[id];
+}
+
+/* the layer exhausted its util_max budget for the current period */
+static __always_inline bool layer_bw_throttled(struct layer *layer)
+{
+	if (!nr_bw_layers)
+		return false;
+	return READ_ONCE(layer->bw_throttled);
 }
 
 // return the dsq id for the layer based on the LLC id.
@@ -1689,6 +1698,13 @@ s32 BPF_STRUCT_OPS(layered_select_cpu, struct task_struct *p, s32 prev_cpu, u64 
 	if (taskc->layer_id == MAX_LAYERS || !(layer = lookup_layer(taskc->layer_id)))
 		return prev_cpu;
 
+	/*
+	 * Never direct-dispatch a throttled layer. The task takes the enqueue
+	 * path and waits in its layer DSQ until the budget is replenished.
+	 */
+	if (layer_bw_throttled(layer))
+		return prev_cpu;
+
 	if (layer->task_place == PLACEMENT_STICK)
 		cpu = prev_cpu;
 	else
@@ -1733,6 +1749,10 @@ static bool try_preempt_cpu(s32 cand, struct task_struct *p, struct task_ctx *ta
 	s32 sib;
 
 	if (cand >= nr_possible_cpus || !bpf_cpumask_test_cpu(cand, p->cpus_ptr))
+		return false;
+
+	/* throttled layers wait in their DSQs, no preemption */
+	if (layer_bw_throttled(layer))
 		return false;
 
 	if (!(cand_cpuc = lookup_cpu_ctx(cand)))
@@ -1936,9 +1956,12 @@ void BPF_STRUCT_OPS(layered_enqueue, struct task_struct *p, u64 enq_flags)
 		return;
 
 	/*
-	 * If select_cpu() was skipped, try direct dispatching to an idle CPU.
+	 * If select_cpu() was skipped, try direct dispatching to an idle CPU
+	 * unless the layer is throttled, in which case the task must wait in
+	 * the layer DSQ.
 	 */
-	if (!__COMPAT_is_enq_cpu_selected(enq_flags) || try_preempt_first) {
+	if ((!__COMPAT_is_enq_cpu_selected(enq_flags) || try_preempt_first) &&
+	    !layer_bw_throttled(layer)) {
 		cpu = pick_idle_cpu(p, task_cpu, cpuc, taskc, layer, false);
 		if (cpu < 0)
 			goto skip_ddsp;
@@ -1968,9 +1991,9 @@ skip_ddsp:
 		return;
 
 	/*
-	 * No idle CPU, try preempting.
+	 * No idle CPU, try preempting unless throttled.
 	 */
-	if (layer->preempt && !yielding) {
+	if (layer->preempt && !yielding && !layer_bw_throttled(layer)) {
 		/*
 		 * See try_preempt_first block above for explanation on the
 		 * wakeup test.
@@ -2203,7 +2226,9 @@ preempt_xnuma_done: ;
 	 */
 	if (!layer->nr_llc_cpus[llc_id]) {
 		layer_llc_drain_enable(layer, llc_id);
-		layer_kick_idle_node_cpu(layer, llc_node_id(llc_id));
+		/* while throttled the unthrottling timer does the kicking */
+		if (!layer_bw_throttled(layer))
+			layer_kick_idle_node_cpu(layer, llc_node_id(llc_id));
 	}
 }
 
@@ -2274,6 +2299,29 @@ static void account_used(struct task_struct *p, struct cpu_ctx *cpuc, struct tas
 		cpuc->layer_membw_agg[task_lid][LAYER_USAGE_OPEN] += bytes;
 	}
 
+	/*
+	 * Charge the layer's bandwidth budget. Charging happens at tick and
+	 * stopping granularity, so a layer can overrun an exhausted budget by
+	 * up to one tick on each of its CPUs before dispatch stops serving it.
+	 */
+	struct layer *layer;
+
+	if (nr_bw_layers && (layer = lookup_layer(task_lid)) && layer->bw_quota_ns &&
+	    __sync_sub_and_fetch(&layer->bw_budget_ns, used) <= 0 &&
+	    !READ_ONCE(layer->bw_throttled)) {
+		WRITE_ONCE(layer->bw_throttled_at, now);
+		WRITE_ONCE(layer->bw_throttled, true);
+		lstat_inc(LSTAT_BW_THROTTLE, layer, cpuc);
+		/*
+		 * The exhausted budget this CPU saw may have raced with a
+		 * concurrent replenish which already cleared the throttle.
+		 * Re-check so the layer isn't wrongly throttled for a period
+		 * despite a refilled budget.
+		 */
+		if (READ_ONCE(layer->bw_budget_ns) > 0)
+			WRITE_ONCE(layer->bw_throttled, false);
+	}
+
 	if (taskc->pinned_node < MAX_NUMA_NODES)
 		cpuc->node_pinned_usage[task_lid] += used;
 
@@ -2290,6 +2338,10 @@ static bool keep_running(struct cpu_ctx *cpuc, struct task_struct *p,
 			 struct task_ctx *taskc, struct layer *layer)
 {
 	if (cpuc->yielding || !max_exec_ns)
+		goto no;
+
+	/* over util_max budget, put the CPU to better use or let it idle */
+	if (layer_bw_throttled(layer))
 		goto no;
 
 	/* Confined tasks must not keep running on a non-layer CPU */
@@ -2487,7 +2539,7 @@ static bool try_drain_layer_node_llcs(struct layer *layer, struct cpu_ctx *cpuc)
 	struct layer_node_ctx *lnc;
 	u32 cnt, nr, u;
 
-	if (nid >= MAX_NUMA_NODES)
+	if (nid >= MAX_NUMA_NODES || layer_bw_throttled(layer))
 		return false;
 
 	nodec = lookup_node_ctx(nid);
@@ -2577,6 +2629,15 @@ static __always_inline bool try_consume_layer(u32 layer_id, struct cpu_ctx *cpuc
 	u32 u;
 
 	if (!(layer = lookup_layer(layer_id)))
+		return false;
+
+	/*
+	 * Leave a bandwidth-throttled layer's DSQs queued. The replenish
+	 * timer clears the throttle and kicks the layer's CPUs.
+	 * antistall_consume() still services them as a starvation escape
+	 * hatch.
+	 */
+	if (layer_bw_throttled(layer))
 		return false;
 
 	/*
@@ -2679,6 +2740,64 @@ bool try_consume_layers(u32 *layer_order, u32 nr, u32 exclude_layer_id,
 	}
 
 	return false;
+}
+
+/*
+ * Consume from the CPU's lo fallback DSQ, skipping tasks whose layer is
+ * bandwidth-throttled so that affinity-restricted tasks can't ride the
+ * fallback path around util_max. When tasks are skipped, mark the CPU so
+ * that the replenish timer re-kicks it once budget returns; any misses
+ * from the marking being racy are rescued by antistall. Like the blind
+ * kernel-side scan of scx_bpf_dsq_move_to_local(), the walk ends at the
+ * first task movable to this CPU.
+ *
+ * Returns non-zero if a task was moved to the local DSQ. __weak so that
+ * it stays a separate verification unit; inlining two DSQ-iterator loops
+ * into layered_dispatch() blows past the verifier instruction limit.
+ */
+__weak int try_consume_lo_fb(void)
+{
+	struct task_struct *it_p;
+	struct cpu_ctx *cpuc;
+	bool skipped = false, moved = false;
+
+	if (!(cpuc = lookup_cpu_ctx(-1)))
+		return 0;
+
+	if (!nr_bw_layers)
+		return scx_bpf_dsq_move_to_local(cpuc->lo_fb_dsq_id, 0);
+
+	scoped_guard(rcu) {
+		bpf_for_each(scx_dsq, it_p, cpuc->lo_fb_dsq_id, 0) {
+			struct task_ctx *taskc;
+			struct layer *layer;
+
+			struct task_struct *p __free(task) = bpf_task_from_pid(it_p->pid);
+			if (!p)
+				continue;
+
+			if (!bpf_cpumask_test_cpu(cpuc->cpu, p->cpus_ptr))
+				continue;
+
+			if ((taskc = lookup_task_ctx_may_fail(p)) &&
+			    taskc->layer_id < nr_layers &&
+			    (layer = lookup_layer(taskc->layer_id)) &&
+			    layer_bw_throttled(layer)) {
+				skipped = true;
+				continue;
+			}
+
+			if (scx_bpf_dsq_move(BPF_FOR_EACH_ITER, p, SCX_DSQ_LOCAL, 0)) {
+				moved = true;
+				break;
+			}
+		}
+	}
+
+	if (skipped && !moved)
+		WRITE_ONCE(cpuc->bw_lo_fb_skipped, true);
+
+	return moved;
 }
 
 bool __always_inline sib_keep_idle(s32 cpu, struct task_struct *prev __arg_trusted, struct layer *prev_layer,
@@ -2809,7 +2928,7 @@ void BPF_STRUCT_OPS(layered_dispatch, s32 cpu, struct task_struct *prev)
 			cpuc->lo_fb_usage_base;
 
 		if (dur > lo_fb_wait_ns && 1024 * usage < lo_fb_share_ppk * dur) {
-			if (scx_bpf_dsq_move_to_local(cpuc->lo_fb_dsq_id, 0))
+			if (try_consume_lo_fb())
 				return;
 			tried_lo_fb = true;
 		}
@@ -2891,7 +3010,7 @@ void BPF_STRUCT_OPS(layered_dispatch, s32 cpu, struct task_struct *prev)
 	}
 
 replenish:
-	if (!tried_lo_fb && scx_bpf_dsq_move_to_local(cpuc->lo_fb_dsq_id, 0))
+	if (!tried_lo_fb && try_consume_lo_fb())
 		return;
 	/*
 	 * !NULL prev_taskc indicates runnable prev.
@@ -2906,6 +3025,14 @@ replenish:
 		 * so it will land back in its own layer's DSQ.
 		 */
 		if (is_protected_layer_guest(cpuc, prev_taskc))
+			return;
+
+		/*
+		 * Ditto for a throttled layer's task. Refreshing the slice
+		 * would let it keep running on an otherwise idle CPU,
+		 * defeating the throttle.
+		 */
+		if (layer_bw_throttled(prev_layer))
 			return;
 
 		scx_bpf_task_set_slice(prev, prev_layer->slice_ns);
@@ -2959,6 +3086,7 @@ void BPF_STRUCT_OPS(layered_tick, struct task_struct *p)
 {
 	struct cpu_ctx *cpuc;
 	struct task_ctx *taskc;
+	struct layer *layer;
 	u64 now = scx_bpf_now();
 
 	if (!(cpuc = lookup_cpu_ctx(-1)) || !(taskc = lookup_task_ctx(p)))
@@ -2966,6 +3094,14 @@ void BPF_STRUCT_OPS(layered_tick, struct task_struct *p)
 
 	update_duty_cycle(cpuc, taskc, now);
 	account_used(p, cpuc, taskc, now);
+
+	/*
+	 * End the slice of a task whose layer ran out of util_max budget so
+	 * that it round-trips through enqueue into its layer DSQ instead of
+	 * running out the rest of the slice.
+	 */
+	if ((layer = lookup_layer(taskc->layer_id)) && layer_bw_throttled(layer))
+		scx_bpf_task_set_slice(p, 0);
 }
 
 static __noinline bool match_one(struct layer *layer, struct layer_match *match, struct task_ctx *taskc,
@@ -4222,6 +4358,7 @@ void BPF_STRUCT_OPS(layered_dump, struct scx_dump_ctx *dctx)
  */
 struct layered_timer layered_timers[MAX_TIMERS] = {
 	{15LLU * NSEC_PER_SEC, CLOCK_BOOTTIME, 0},
+	{LAYER_BW_PERIOD_NS, CLOCK_BOOTTIME, 0},
 };
 
 /**
@@ -4328,6 +4465,122 @@ static u64 antistall_scan(void)
 	return layered_timers[ANTISTALL_TIMER].interval_ns;
 }
 
+/**
+ * layer_bw_kick() - wake a just-unthrottled layer's CPUs.
+ * @layer: layer which got its bandwidth budget replenished.
+ *
+ * Kick the layer's CPUs on LLCs with queued tasks so they resume consuming
+ * the DSQs which dispatch refused to touch while the layer was throttled.
+ * SCX_KICK_IDLE is a no-op for busy CPUs. This may wake more CPUs than
+ * there are queued tasks; the surplus ones go back to idle.
+ */
+static void layer_bw_kick(struct layer *layer)
+{
+	u64 queued_llcs = 0;
+	u32 llc, cpu;
+
+	bpf_for(llc, 0, nr_llcs)
+		if (scx_bpf_dsq_nr_queued(layer_dsq_id(layer->id, llc)))
+			queued_llcs |= 1LLU << llc;
+
+	if (!queued_llcs)
+		return;
+
+	bpf_for(cpu, 0, nr_possible_cpus) {
+		u8 *u8_ptr;
+
+		if (!(queued_llcs & (1LLU << cpu_to_llc_id(cpu))))
+			continue;
+
+		if ((u8_ptr = MEMBER_VPTR(layer->cpus, [cpu / 8])) &&
+		    (*u8_ptr & (1 << (cpu % 8))))
+			scx_bpf_kick_cpu(cpu, SCX_KICK_IDLE);
+	}
+}
+
+/**
+ * layer_bw_replenish() - grant each layer its per-period util_max budget.
+ *
+ * Runs every LAYER_BW_PERIOD_NS. Unthrottles layers whose budget recovered
+ * above zero. Returns 0, stopping the timer, when no layer has a quota
+ * configured.
+ */
+static u64 layer_bw_replenish(void)
+{
+	struct cpu_ctx *cpuc;
+	struct layer *layer;
+	bool unthrottled = false;
+	u64 now = scx_bpf_now();
+	u32 layer_id;
+	s32 cpu;
+
+	if (!nr_bw_layers || !(cpuc = lookup_cpu_ctx(-1)))
+		return 0;
+
+	bpf_for(layer_id, 0, nr_layers) {
+		s64 quota, budget;
+
+		if (!(layer = lookup_layer(layer_id)))
+			return 0;
+
+		quota = layer->bw_quota_ns;
+		if (!quota)
+			continue;
+
+		budget = __sync_add_and_fetch(&layer->bw_budget_ns, quota);
+
+		/*
+		 * Clamp the budget to [-quota, quota]: no burst carry-over
+		 * beyond one period, and bounded debt so that execution which
+		 * bypasses the throttle (fallback DSQs, antistall) can't
+		 * starve the layer indefinitely. The blind writes can race
+		 * with a concurrent charge in account_used(); the error is at
+		 * most one accounting delta and washes out next period.
+		 */
+		if (budget > quota)
+			WRITE_ONCE(layer->bw_budget_ns, quota);
+		else if (budget < -quota)
+			WRITE_ONCE(layer->bw_budget_ns, -quota);
+
+		if (!READ_ONCE(layer->bw_throttled) || budget <= 0)
+			continue;
+
+		/*
+		 * bw_throttled_at may be later than @now if the layer got
+		 * throttled while this callback was already running.
+		 */
+		s64 throttled_for = now - READ_ONCE(layer->bw_throttled_at);
+
+		if (throttled_for > 0)
+			lstat_add(LSTAT_BW_THROTTLE_NS, layer, cpuc, throttled_for);
+		WRITE_ONCE(layer->bw_throttled, false);
+		layer_bw_kick(layer);
+		unthrottled = true;
+	}
+
+	/*
+	 * Re-kick CPUs which skipped throttled lo fallback tasks and may
+	 * have gone idle with those tasks still queued. layer_bw_kick()
+	 * can't cover them: lo_fb tasks are affinity-restricted, so the
+	 * CPUs which can serve them aren't necessarily the layer's.
+	 */
+	if (unthrottled) {
+		bpf_for(cpu, 0, nr_possible_cpus) {
+			struct cpu_ctx *remote_cpuc;
+
+			if (!(remote_cpuc = lookup_cpu_ctx(cpu)))
+				break;
+
+			if (READ_ONCE(remote_cpuc->bw_lo_fb_skipped)) {
+				WRITE_ONCE(remote_cpuc->bw_lo_fb_skipped, false);
+				scx_bpf_kick_cpu(cpu, SCX_KICK_IDLE);
+			}
+		}
+	}
+
+	return layered_timers[BW_TIMER].interval_ns;
+}
+
 /*
  * Timer callback that runs all registered timers. If a timer returns a non
  * zero value it is rerun after the return value (in nanoseconds).
@@ -4337,6 +4590,8 @@ u64 run_timer_cb(int key)
 	switch (key) {
 	case ANTISTALL_TIMER:
 		return antistall_scan();
+	case BW_TIMER:
+		return layer_bw_replenish();
 	case MAX_TIMERS:
 	default:
 		return 0;

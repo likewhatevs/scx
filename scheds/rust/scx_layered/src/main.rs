@@ -396,6 +396,18 @@ lazy_static! {
 ///   between 1 and 1024 indicates the performance level CPUs running tasks
 ///   in this layer are configured to using scx_bpf_cpuperf_set().
 ///
+/// - util_max: Maximum CPU utilization the layer may consume, in units of
+///   whole CPUs (0.2 = 20% of one CPU, 2.0 = two CPUs). Enforced with a
+///   token bucket replenished every 100ms: once the layer exhausts its
+///   budget, its tasks are left queued until the next replenish instead of
+///   being run, preferring idle CPUs over executing the layer's work.
+///   Useful to keep background layers (e.g. indexers) from burning power
+///   or stealing cycles without disabling them. Enforcement is best-effort
+///   at tick granularity. The low fallback DSQs (restricted-affinity
+///   tasks) honor the throttle by skipping throttled tasks; per-cpu
+///   kthread execution and antistall rescues bypass it but still consume
+///   budget.
+///
 /// - idle_resume_us: Sets the idle resume QoS value. CPU idle time governors are expected to
 ///   regard the minimum of the global (effective) CPU latency limit and the effective resume
 ///   latency constraint for the given CPU as the upper limit for the exit latency of the idle
@@ -1584,6 +1596,12 @@ impl Layer {
             bail!("util_peak_half_life_ms requires util_range");
         }
 
+        if let Some(util_max) = kind.common().util_max {
+            if util_max <= 0.0 {
+                bail!("invalid util_max {}", util_max);
+            }
+        }
+
         let layer_growth_algo = kind.common().growth_algo.clone();
 
         debug!(
@@ -2157,6 +2175,7 @@ impl<'a> Scheduler<'a> {
                     xllc_mig_min_us,
                     placement,
                     member_expire_ms,
+                    util_max,
                     ..
                 } = spec.kind.common();
 
@@ -2190,6 +2209,9 @@ impl<'a> Scheduler<'a> {
                     v => v * 1000,
                 };
                 layer.xllc_mig_min_ns = (xllc_mig_min_us * 1000.0) as u64;
+                layer.bw_quota_ns =
+                    (util_max.unwrap_or(0.0) * bpf_intf::consts_LAYER_BW_PERIOD_NS as f64) as u64;
+                layer.bw_budget_ns = layer.bw_quota_ns as i64;
                 layer_weights.push(layer.weight.try_into().unwrap());
                 layer.perf = u32::try_from(*perf)?;
 
@@ -2919,6 +2941,10 @@ impl<'a> Scheduler<'a> {
         rodata.nr_excl_layers = layer_specs
             .iter()
             .filter(|spec| spec.kind.common().exclusive)
+            .count() as u32;
+        rodata.nr_bw_layers = layer_specs
+            .iter()
+            .filter(|spec| spec.kind.common().util_max.is_some())
             .count() as u32;
 
         let mut min_open = u64::MAX;
